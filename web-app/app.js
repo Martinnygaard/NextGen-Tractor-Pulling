@@ -330,6 +330,18 @@ class HubConnection {
 
             log(`${this.label}: program flashet (${data.length} bytes)`);
             this.flashSuccessUntil = Date.now() + 4000;
+
+            // Auto-start the freshly flashed program so we don't end up running
+            // a stale program still sitting in flash from a previous Pybricks
+            // Code upload. Without this we have seen displays 2/3 "stop after
+            // ~1 s" because the OLD program kept running while the new bundle
+            // sat unused in user RAM.
+            try {
+                await this.startProgram();
+                log(`${this.label}: program startet automatisk`);
+            } catch (e) {
+                log(`${this.label}: auto-start fejlede: ` + (e && e.message ? e.message : e));
+            }
         } finally {
             this.flashing = false;
             this.flashProgress = 0;
@@ -426,7 +438,7 @@ function hubStatusText(hub) {
         return `Opdaterer … ${pct}%`;
     }
     if (hub.flashSuccessUntil && Date.now() < hub.flashSuccessUntil) {
-        return `Program opdateret ✓ — tryk Start program`;
+        return `Program opdateret ✓`;
     }
     if (!hub.hasStatus) return `Forbundet: ${name} · venter på status`;
     const base = `Forbundet: ${name} · ${hub.isProgramRunning() ? "Program kører" : "Idle"}`;
