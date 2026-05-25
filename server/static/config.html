@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="da">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Konfiguration - LEGO Tractor Pull</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">NextGen Tractor Pull</p>
+          <h1>Konfiguration</h1>
+        </div>
+        <div class="hero-status">
+          <a href="/" class="status-pill">&larr; Tilbage</a>
+          <div class="status-pill" id="save-status">Indlæser...</div>
+        </div>
+      </header>
+
+      <section class="grid">
+        <article class="card config-card">
+          <h2>Slæde indstillinger</h2>
+
+          <div class="config-row">
+            <label for="ramp-end">Target distance for slæde 100% <small>(LEGO meter)</small></label>
+            <div class="slider-row">
+              <input id="ramp-end" type="range" min="5" max="100" step="1" value="70" />
+              <input id="ramp-end-num" type="number" min="5" max="100" step="1" value="70" />
+            </div>
+          </div>
+
+          <div class="config-row">
+            <label for="full-rot">Encoder rotationer for 100m</label>
+            <div class="slider-row">
+              <input id="full-rot" type="range" min="1" max="200" step="0.5" value="43" />
+              <input id="full-rot-num" type="number" min="1" max="200" step="0.5" value="43" />
+            </div>
+          </div>
+
+          <div class="control-row">
+            <button id="save-config" class="btn btn-primary">Gem og send til slæde</button>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      const rampEnd = document.querySelector("#ramp-end");
+      const rampEndNum = document.querySelector("#ramp-end-num");
+      const fullRot = document.querySelector("#full-rot");
+      const fullRotNum = document.querySelector("#full-rot-num");
+      const saveBtn = document.querySelector("#save-config");
+      const status = document.querySelector("#save-status");
+
+      function link(slider, num) {
+        slider.addEventListener("input", () => { num.value = slider.value; });
+        num.addEventListener("input", () => { slider.value = num.value; });
+      }
+      link(rampEnd, rampEndNum);
+      link(fullRot, fullRotNum);
+
+      async function load() {
+        try {
+          const r = await fetch("/api/sled-config");
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          const cfg = await r.json();
+          rampEnd.value = rampEndNum.value = cfg.ramp_end_m;
+          fullRot.value = fullRotNum.value = cfg.full_rotations;
+          status.textContent = "Klar";
+        } catch (err) {
+          status.textContent = "Fejl: " + err.message;
+        }
+      }
+
+      saveBtn.addEventListener("click", async () => {
+        status.textContent = "Gemmer...";
+        try {
+          const r = await fetch("/api/sled-config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ramp_end_m: Number(rampEndNum.value),
+              full_rotations: Number(fullRotNum.value),
+            }),
+          });
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          status.textContent = "Gemt - sendt til slæde";
+        } catch (err) {
+          status.textContent = "Fejl: " + err.message;
+        }
+      });
+
+      load();
+    </script>
+  </body>
+</html>

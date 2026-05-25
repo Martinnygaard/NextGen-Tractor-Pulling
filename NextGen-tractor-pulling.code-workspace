@@ -1,0 +1,24 @@
+{
+  "folders": [
+    {
+      "name": "NextGen-tractor-pulling",
+      "path": "."
+    },
+    {
+      "name": "Hub Code",
+      "path": "hubs"
+    },
+    {
+      "name": "Raspberry Server",
+      "path": "server"
+    }
+  ],
+  "settings": {
+    "python.analysis.typeCheckingMode": "basic",
+    "python.defaultInterpreterPath": "${workspaceFolder:Raspberry Server}/.venv/Scripts/python.exe",
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/.pytest_cache": true
+    }
+  }
+}

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="da">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LEGO Tractor Pull Scoreboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Rajdhani:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="shell" aria-live="polite">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">NextGen Tractor Pull</p>
+          <h1>Control Deck</h1>
+        </div>
+        <div class="hero-status">
+          <a href="/config.html" class="status-pill">Config</a>
+          <button type="button" id="api-status" class="status-pill status-button">Forbinder...</button>
+        </div>
+      </header>
+
+      <dialog id="hub-dialog" class="hub-dialog">
+        <form method="dialog" class="hub-dialog-form">
+          <header class="hub-dialog-header">
+            <h2>Hub-forbindelser</h2>
+            <div class="hub-dialog-actions">
+              <button type="button" id="reboot-all" class="btn btn-warning">Reboot all</button>
+              <button type="submit" class="btn btn-close" value="close">Luk</button>
+            </div>
+          </header>
+          <div id="hub-dialog-meta" class="sub">Indlæser...</div>
+          <ul id="hub-list" class="hub-list"></ul>
+        </form>
+      </dialog>
+
+      <section class="grid">
+        <article class="card display-card">
+          <h2>Scoreboard</h2>
+          <div id="display" class="display">000</div>
+          <div class="sub">Live output til tavlen</div>
+        </article>
+
+        <article class="card pull-card">
+          <h2>Pull Control</h2>
+          <div class="control-row wrap">
+            <button data-sled-action="start_pull" class="btn btn-primary sled-action">Start Pull</button>
+            <button data-sled-action="stop_pull" class="btn btn-danger sled-action">Stop Pull</button>
+          </div>
+        </article>
+
+        <article class="card controls-card">
+          <h2>Manual Scoreboard Control</h2>
+          <div class="control-row">
+            <input id="score" type="number" min="0" max="999" value="0" />
+            <button id="set-score" class="btn btn-primary">Set Score</button>
+          </div>
+          <div class="control-row">
+            <button id="score-minus" class="btn">-1</button>
+            <button id="score-plus" class="btn">+1</button>
+            <button id="full-pull" class="btn btn-warning">FULL PULL</button>
+            <button id="reset" class="btn btn-danger">Reset</button>
+          </div>
+          <div id="scoreboard-command" class="meta-line">Ingen kommando endnu</div>
+        </article>
+
+        <article class="card sled-card">
+          <h2>Manual Sled Control</h2>
+          <div class="sled-grid">
+            <div class="sled-group">
+              <h3 class="group-title">Slæde</h3>
+              <button data-sled-action="home_weight" class="btn btn-secondary sled-action">Home Weight</button>
+              <div class="control-row">
+                <input id="weight-percent" type="number" min="0" max="100" value="50" />
+                <button id="set-weight" class="btn">Set Weight %</button>
+              </div>
+            </div>
+            <div class="sled-group">
+              <h3 class="group-title">Lys</h3>
+              <div class="light-buttons">
+                <button data-sled-action="set_signal_red" class="btn sled-action">Signal Red</button>
+                <button data-sled-action="set_signal_green" class="btn sled-action">Signal Green</button>
+                <button data-sled-action="set_signal_green_blink" class="btn sled-action">Signal Green Blink</button>
+                <button data-sled-action="clear_signal" class="btn sled-action">Lights Off</button>
+              </div>
+            </div>
+          </div>
+          <div id="sled-command" class="meta-line">Ingen kommando endnu</div>
+        </article>
+
+        <article class="card history-card">
+          <h2>Træk Historik</h2>
+          <form id="history-form" class="history-form">
+            <input id="tractor" type="text" placeholder="Traktor navn" required />
+            <input id="result" type="number" min="0" max="100" step="0.1" placeholder="Resultat (m)" required />
+            <button class="btn btn-primary" type="submit">Tilføj</button>
+            <button id="clear-history" class="btn btn-danger" type="button">Ryd</button>
+          </form>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Tid</th>
+                  <th>Traktor</th>
+                  <th>Resultat (m)</th>
+                </tr>
+              </thead>
+              <tbody id="history-body"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
+

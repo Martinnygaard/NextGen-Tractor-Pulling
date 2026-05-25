@@ -1,0 +1,21 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Server: install dependencies",
+      "type": "shell",
+      "command": "python -m pip install -r server/requirements.txt",
+      "problemMatcher": []
+    },
+    {
+      "label": "Server: run dev",
+      "type": "shell",
+      "command": "python -m uvicorn app:app --host 0.0.0.0 --port 8000 --reload",
+      "options": {
+        "cwd": "${workspaceFolder}/server"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
+
