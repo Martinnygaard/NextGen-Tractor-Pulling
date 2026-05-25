@@ -12,6 +12,19 @@ const CMD_WRITE_STDIN = 0x06;
 const EVT_STATUS_REPORT = 0x00;
 const EVT_WRITE_STDOUT = 0x01;
 
+// Sled command actions (must match hubs/sled.py CMD_* constants).
+const SLED_ACTIONS = {
+    start_pull: 1,
+    stop_pull: 2,
+    home_weight: 3,
+    set_signal_red: 4,
+    set_signal_green: 5,
+    set_weight_percent: 6,
+    reset_distance: 7,
+    clear_signal: 8,
+    set_signal_green_blink: 9,
+};
+
 const ui = {
     connect: document.getElementById("btn-connect"),
     disconnect: document.getElementById("btn-disconnect"),
@@ -22,12 +35,17 @@ const ui = {
     score: document.getElementById("score"),
     status: document.getElementById("status"),
     log: document.getElementById("log"),
+    distance: document.getElementById("distance"),
+    lastAck: document.getElementById("last-ack"),
+    lastSeq: document.getElementById("last-seq"),
+    sledButtons: document.querySelectorAll(".sled-action"),
 };
 
 let device = null;
 let server = null;
 let commandChar = null;
 let stdoutBuffer = "";
+let cmdSeq = 0; // local sequence counter for sled commands (phone-assigned)
 
 function setStatus(text, kind) {
     ui.status.textContent = text;
@@ -47,6 +65,12 @@ function setConnectedUi(connected) {
     if (ui.stopProgram) ui.stopProgram.disabled = !connected;
     ui.sendScore.disabled = !connected;
     ui.fullPull.disabled = !connected;
+    ui.sledButtons.forEach((b) => { b.disabled = !connected; });
+}
+
+function setDistance(meters) {
+    if (!ui.distance) return;
+    ui.distance.textContent = meters.toFixed(1) + " m";
 }
 
 async function connect() {
@@ -96,6 +120,25 @@ async function disconnect() {
     }
 }
 
+function handleHubLine(line) {
+    // D <integer>  -> live distance from sled, encoded as tenths of a meter.
+    if (line.startsWith("D ")) {
+        const v = parseInt(line.slice(2).trim(), 10);
+        if (!Number.isNaN(v)) {
+            setDistance(v / 10);
+        }
+        return;
+    }
+    // A <seq>  -> sled acknowledged command seq
+    if (line.startsWith("A ")) {
+        const v = parseInt(line.slice(2).trim(), 10);
+        if (!Number.isNaN(v) && ui.lastAck) {
+            ui.lastAck.textContent = String(v);
+        }
+        return;
+    }
+}
+
 function onEvent(event) {
     const dv = event.target.value;
     if (!dv || dv.byteLength < 1) return;
@@ -109,11 +152,12 @@ function onEvent(event) {
         while ((idx = stdoutBuffer.indexOf("\n")) >= 0) {
             const line = stdoutBuffer.slice(0, idx).replace(/\r$/, "");
             stdoutBuffer = stdoutBuffer.slice(idx + 1);
-            if (line.length) log("hub: " + line);
+            if (!line.length) continue;
+            handleHubLine(line);
+            log("hub: " + line);
         }
     } else if (evtId === EVT_STATUS_REPORT) {
         // First 4 bytes after evtId are a uint32 bitfield of hub status flags.
-        // Useful later for "is a user program running?" etc.
     } else {
         log(`evt 0x${evtId.toString(16)} (${data.byteLength}B)`);
     }
@@ -122,9 +166,7 @@ function onEvent(event) {
 async function writeStdin(text) {
     if (!commandChar) throw new Error("Not connected");
     const bytes = new TextEncoder().encode(text);
-    // Pybricks command frame: [cmd_id][payload...]
-    // Keep frames small enough for default BLE MTU (23 -> 20 bytes payload).
-    const CHUNK = 18; // 1 byte cmd + up to 18 = 19 total (safe under 20)
+    const CHUNK = 18;
     for (let offset = 0; offset < bytes.length; offset += CHUNK) {
         const slice = bytes.subarray(offset, offset + CHUNK);
         const frame = new Uint8Array(1 + slice.length);
@@ -145,10 +187,28 @@ async function sendScore(value) {
     }
 }
 
+async function sendSledCommand(action, value) {
+    const actionId = SLED_ACTIONS[action];
+    if (actionId === undefined) {
+        log("FEJL: ukendt sled-action " + action);
+        return;
+    }
+    cmdSeq += 1;
+    const seq = cmdSeq;
+    const v = Math.trunc(Number(value) || 0);
+    const line = `C ${seq} ${actionId} ${v}\n`;
+    if (ui.lastSeq) ui.lastSeq.textContent = String(seq);
+    try {
+        await writeStdin(line);
+        log(`tx: ${action}(${v}) seq=${seq}`);
+    } catch (err) {
+        log("FEJL sled-cmd: " + (err && err.message ? err.message : err));
+    }
+}
+
 async function startProgram() {
     if (!commandChar) return;
     try {
-        // Pybricks CMD_START_USER_PROGRAM, payload = program id (0 = default user program).
         await commandChar.writeValueWithResponse(new Uint8Array([CMD_START_USER_PROGRAM, 0]));
         log("tx: START_USER_PROGRAM");
     } catch (err) {
@@ -172,6 +232,19 @@ if (ui.startProgram) ui.startProgram.addEventListener("click", startProgram);
 if (ui.stopProgram) ui.stopProgram.addEventListener("click", stopProgram);
 ui.sendScore.addEventListener("click", () => sendScore(ui.score.value));
 ui.fullPull.addEventListener("click", () => sendScore(10000));
+
+ui.sledButtons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+        const action = btn.dataset.action;
+        let value = 0;
+        const fromSel = btn.dataset.valueFrom;
+        if (fromSel) {
+            const el = document.querySelector(fromSel);
+            if (el) value = el.value;
+        }
+        sendSledCommand(action, value);
+    });
+});
 
 // Register service worker for PWA install (optional, fails silently in dev).
 if ("serviceWorker" in navigator) {

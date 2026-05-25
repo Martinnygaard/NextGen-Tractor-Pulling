@@ -40,6 +40,15 @@
         </section>
 
         <section class="card">
+            <h2>Live afstand</h2>
+            <div id="distance" class="distance">--.- m</div>
+            <div class="sub">
+                Sidste ACK: <span id="last-ack">-</span>
+                · Sidste sendt seq: <span id="last-seq">-</span>
+            </div>
+        </section>
+
+        <section class="card">
             <h2>Score</h2>
             <div class="row">
                 <input id="score" type="number" min="0" max="999" value="0" />
@@ -47,6 +56,34 @@
                 <button id="btn-full-pull" class="btn btn-warning" disabled>FULL PULL</button>
             </div>
             <p class="hint">Sender <code>S &lt;score&gt;\n</code> via Pybricks BLE WRITE_STDIN.</p>
+        </section>
+
+        <section class="card">
+            <h2>Pull control</h2>
+            <div class="row">
+                <button class="btn btn-primary sled-action" data-action="start_pull" disabled>Start pull</button>
+                <button class="btn btn-warning sled-action" data-action="stop_pull" disabled>Stop pull</button>
+                <button class="btn sled-action" data-action="reset_distance" disabled>Reset distance</button>
+            </div>
+        </section>
+
+        <section class="card">
+            <h2>Slæde</h2>
+            <div class="row">
+                <button class="btn sled-action" data-action="home_weight" disabled>Home weight</button>
+            </div>
+            <div class="row">
+                <label class="weight-label">Vægt:
+                    <input id="weight" type="number" min="0" max="100" step="1" value="0" />%
+                </label>
+                <button class="btn sled-action" data-action="set_weight_percent" data-value-from="#weight" disabled>Sæt vægt</button>
+            </div>
+            <div class="row">
+                <button class="btn sled-action signal signal-red" data-action="set_signal_red" disabled>Rød</button>
+                <button class="btn sled-action signal signal-green" data-action="set_signal_green" disabled>Grøn</button>
+                <button class="btn sled-action signal signal-blink" data-action="set_signal_green_blink" disabled>Blink</button>
+                <button class="btn sled-action signal signal-off" data-action="clear_signal" disabled>Sluk</button>
+            </div>
         </section>
 
         <section class="card">
