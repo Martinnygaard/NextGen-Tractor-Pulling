@@ -28,8 +28,10 @@ const ui = {
     lastSeq: document.getElementById("last-seq"),
 
     hubsBtn: document.getElementById("btn-hubs"),
+    manualBtn: document.getElementById("btn-manual"),
     settingsBtn: document.getElementById("btn-settings"),
     hubDialog: document.getElementById("hub-dialog"),
+    manualDialog: document.getElementById("manual-dialog"),
     settingsDialog: document.getElementById("settings-dialog"),
 
     // Master
@@ -295,6 +297,7 @@ async function pushConfig() {
 // ---------------- Wire up ----------------
 
 ui.hubsBtn.addEventListener("click", () => ui.hubDialog.showModal());
+ui.manualBtn.addEventListener("click", () => ui.manualDialog.showModal());
 ui.settingsBtn.addEventListener("click", () => ui.settingsDialog.showModal());
 
 ui.connect.addEventListener("click", async () => {
