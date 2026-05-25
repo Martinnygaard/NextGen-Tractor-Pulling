@@ -370,11 +370,13 @@ code {
 .plates-row {
     align-items: stretch;
 }
+
 .plates-row input[type="number"] {
     flex: 1 1 80px;
     text-align: center;
     font-size: 1.15rem;
 }
+
 .plates-row .btn {
     flex: 0 0 56px;
     font-size: 1.4rem;
@@ -392,19 +394,23 @@ code {
     padding: 10px 12px;
     font: inherit;
 }
+
 .entry-hint {
     margin: 6px 0 10px;
     font-size: 0.85rem;
 }
+
 .table-wrap {
     overflow-x: auto;
     border-radius: 10px;
 }
+
 table.scoreboard {
     width: 100%;
     border-collapse: collapse;
     font-size: 0.95rem;
 }
+
 table.scoreboard th,
 table.scoreboard td {
     text-align: left;
@@ -412,6 +418,7 @@ table.scoreboard td {
     border-bottom: 1px solid #1f2937;
     white-space: nowrap;
 }
+
 table.scoreboard thead th {
     color: var(--muted);
     font-weight: 700;
@@ -420,14 +427,17 @@ table.scoreboard thead th {
     letter-spacing: 0.05em;
     background: #0b1220;
 }
+
 table.scoreboard tbody tr:hover {
     background: #0b122066;
 }
+
 table.scoreboard td:last-child,
 table.scoreboard th:last-child {
     width: 1%;
     text-align: right;
 }
+
 .btn-edit {
     background: transparent;
     border: 1px solid #334155;
@@ -437,6 +447,7 @@ table.scoreboard th:last-child {
     border-radius: 8px;
     font-size: 1rem;
 }
+
 .btn-edit:hover {
     background: #1e293b;
 }

@@ -580,6 +580,29 @@ ui.scoreboardBody.addEventListener("click", (ev) => {
 ui.btnEditSave.addEventListener("click", saveEdit);
 ui.btnEditDelete.addEventListener("click", deleteEdit);
 
+// Force reload: unregister SW, clear caches, reload.
+const btnForceReload = document.getElementById("btn-force-reload");
+if (btnForceReload) {
+    btnForceReload.addEventListener("click", async () => {
+        btnForceReload.disabled = true;
+        btnForceReload.textContent = "Rydder...";
+        try {
+            if ("serviceWorker" in navigator) {
+                const regs = await navigator.serviceWorker.getRegistrations();
+                await Promise.all(regs.map((r) => r.unregister()));
+            }
+            if ("caches" in window) {
+                const keys = await caches.keys();
+                await Promise.all(keys.map((k) => caches.delete(k)));
+            }
+        } catch (e) { /* ignore */ }
+        // Bypass HTTP cache too.
+        const url = new URL(window.location.href);
+        url.searchParams.set("_", Date.now().toString());
+        window.location.replace(url.toString());
+    });
+}
+
 loadConfig();
 loadScoreboard();
 refreshUi();
