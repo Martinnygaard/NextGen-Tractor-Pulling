@@ -208,6 +208,14 @@ class HubConnection {
         }
 
         log(`${this.label}: forbundet til ${this.device.name}`);
+        try {
+            const p = this.commandChar.properties || {};
+            const flags = [];
+            if (p.write) flags.push("write");
+            if (p.writeWithoutResponse) flags.push("writeWithoutResponse");
+            if (p.notify) flags.push("notify");
+            log(`${this.label}: cmd char props=${flags.join(",") || "?"}`);
+        } catch (_) { /* ignore */ }
         this.onStateChange();
     }
 
@@ -330,6 +338,22 @@ class HubConnection {
             const totalChunks = Math.ceil(data.length / chunkSize);
             log(`${this.label}: flasher ${data.length} bytes i ${totalChunks} chunks à ${chunkSize}`);
 
+            // Some hubs accept writes without response, others insist on
+            // response. We probe with-response first (matches what works on
+            // Display 1) and fall back to no-response on GATT errors.
+            const cc = this.commandChar;
+            const writeChar = async (buf) => {
+                try {
+                    await cc.writeValueWithResponse(buf);
+                } catch (e) {
+                    if (cc.properties && cc.properties.writeWithoutResponse) {
+                        await cc.writeValueWithoutResponse(buf);
+                    } else {
+                        throw e;
+                    }
+                }
+            };
+
             // 1. WRITE_USER_PROGRAM_META with total size. Retry once on
             //    failure — the very first write right after STOP sometimes
             //    fails while the firmware is still cleaning up.
@@ -338,11 +362,11 @@ class HubConnection {
                 buf[0] = CMD_WRITE_USER_PROGRAM_META;
                 new DataView(buf.buffer).setUint32(1, data.length, true);
                 try {
-                    await this.commandChar.writeValueWithResponse(buf);
+                    await writeChar(buf);
                 } catch (e) {
                     log(`${this.label}: META retry efter ${e && e.message ? e.message : e}`);
-                    await new Promise((r) => setTimeout(r, 500));
-                    await this.commandChar.writeValueWithResponse(buf);
+                    await new Promise((r) => setTimeout(r, 800));
+                    await writeChar(buf);
                 }
             }
 
@@ -354,7 +378,7 @@ class HubConnection {
                 buf[0] = CMD_WRITE_USER_RAM;
                 new DataView(buf.buffer).setUint32(1, off, true);
                 buf.set(slice, overhead);
-                await this.commandChar.writeValueWithResponse(buf);
+                await writeChar(buf);
                 this.flashProgress = end / data.length;
                 this.onStateChange();
             }
