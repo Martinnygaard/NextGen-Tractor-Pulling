@@ -184,3 +184,17 @@ code {
     background: #1e293b;
     border-color: #475569;
 }
+
+.config-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+.config-row label {
+    color: var(--muted);
+    font-size: 0.95rem;
+}
+.config-row input[type="range"] {
+    width: 100%;
+}

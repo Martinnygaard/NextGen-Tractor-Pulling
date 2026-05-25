@@ -9,7 +9,6 @@ const CMD_START_USER_PROGRAM = 0x01;
 const CMD_WRITE_STDIN = 0x06;
 
 // Event IDs (hub -> host).
-const EVT_STATUS_REPORT = 0x00;
 const EVT_WRITE_STDOUT = 0x01;
 
 // Sled command actions (must match hubs/sled.py CMD_* constants).
@@ -23,34 +22,45 @@ const SLED_ACTIONS = {
     reset_distance: 7,
     clear_signal: 8,
     set_signal_green_blink: 9,
+    set_ramp_end_m: 10,
+    set_full_rotations: 11,
 };
 
 const ui = {
-    connect: document.getElementById("btn-connect"),
-    disconnect: document.getElementById("btn-disconnect"),
-    startProgram: document.getElementById("btn-start-program"),
-    stopProgram: document.getElementById("btn-stop-program"),
-    sendScore: document.getElementById("btn-send-score"),
-    fullPull: document.getElementById("btn-full-pull"),
-    score: document.getElementById("score"),
-    status: document.getElementById("status"),
     log: document.getElementById("log"),
     distance: document.getElementById("distance"),
     lastAck: document.getElementById("last-ack"),
     lastSeq: document.getElementById("last-seq"),
+
+    // Master card
+    connect: document.getElementById("btn-connect"),
+    disconnect: document.getElementById("btn-disconnect"),
+    startProgram: document.getElementById("btn-start-program"),
+    stopProgram: document.getElementById("btn-stop-program"),
+    status: document.getElementById("status"),
+
+    // Sled card
+    sledConnect: document.getElementById("btn-sled-connect"),
+    sledDisconnect: document.getElementById("btn-sled-disconnect"),
+    sledStart: document.getElementById("btn-sled-start"),
+    sledStop: document.getElementById("btn-sled-stop"),
+    sledPushCfg: document.getElementById("btn-push-config"),
+    sledStatus: document.getElementById("sled-status"),
+
+    // Score + sled control
+    sendScore: document.getElementById("btn-send-score"),
+    fullPull: document.getElementById("btn-full-pull"),
+    score: document.getElementById("score"),
     sledButtons: document.querySelectorAll(".sled-action"),
+
+    // Config
+    cfgRamp: document.getElementById("cfg-ramp"),
+    cfgRampVal: document.getElementById("cfg-ramp-val"),
+    cfgRot: document.getElementById("cfg-rot"),
+    cfgRotVal: document.getElementById("cfg-rot-val"),
 };
 
-let device = null;
-let server = null;
-let commandChar = null;
-let stdoutBuffer = "";
-let cmdSeq = 0; // local sequence counter for sled commands (phone-assigned)
-
-function setStatus(text, kind) {
-    ui.status.textContent = text;
-    ui.status.dataset.kind = kind || "";
-}
+let cmdSeq = 0; // local sequence counter for sled commands
 
 function log(line) {
     const ts = new Date().toLocaleTimeString("da-DK", { hour12: false });
@@ -58,14 +68,10 @@ function log(line) {
     ui.log.scrollTop = ui.log.scrollHeight;
 }
 
-function setConnectedUi(connected) {
-    ui.connect.disabled = connected;
-    ui.disconnect.disabled = !connected;
-    if (ui.startProgram) ui.startProgram.disabled = !connected;
-    if (ui.stopProgram) ui.stopProgram.disabled = !connected;
-    ui.sendScore.disabled = !connected;
-    ui.fullPull.disabled = !connected;
-    ui.sledButtons.forEach((b) => { b.disabled = !connected; });
+function setStatus(el, text, kind) {
+    if (!el) return;
+    el.textContent = text;
+    el.dataset.kind = kind || "";
 }
 
 function setDistance(meters) {
@@ -73,114 +79,147 @@ function setDistance(meters) {
     ui.distance.textContent = meters.toFixed(1) + " m";
 }
 
-async function connect() {
-    if (!("bluetooth" in navigator)) {
-        setStatus("Web Bluetooth ikke tilgængelig", "error");
-        log("FEJL: Browser understøtter ikke Web Bluetooth. Brug Chrome eller Edge.");
-        return;
+// ---------------- Hub abstraction ----------------
+
+class HubConnection {
+    constructor(label, namePrefix, onLine) {
+        this.label = label;
+        this.namePrefix = namePrefix;
+        this.onLine = onLine;
+        this.device = null;
+        this.server = null;
+        this.commandChar = null;
+        this.stdoutBuffer = "";
+        this.onStateChange = () => { };
     }
 
-    try {
-        setStatus("Vælger enhed...");
-        device = await navigator.bluetooth.requestDevice({
-            filters: [{ namePrefix: "Puller" }],
+    isConnected() {
+        return !!this.commandChar;
+    }
+
+    async connect() {
+        if (!("bluetooth" in navigator)) {
+            throw new Error("Web Bluetooth ikke tilgængelig");
+        }
+        this.device = await navigator.bluetooth.requestDevice({
+            filters: [{ namePrefix: this.namePrefix }],
             optionalServices: [PYBRICKS_SERVICE],
         });
-        device.addEventListener("gattserverdisconnected", onDisconnected);
+        this.device.addEventListener("gattserverdisconnected", () => {
+            log(`${this.label}: afbrudt`);
+            this.commandChar = null;
+            this.server = null;
+            this.onStateChange();
+        });
+        this.server = await this.device.gatt.connect();
+        const service = await this.server.getPrimaryService(PYBRICKS_SERVICE);
+        this.commandChar = await service.getCharacteristic(PYBRICKS_COMMAND_EVENT_CHAR);
+        await this.commandChar.startNotifications();
+        this.commandChar.addEventListener("characteristicvaluechanged", (e) => this._onEvent(e));
+        log(`${this.label}: forbundet til ${this.device.name}`);
+        this.onStateChange();
+    }
 
-        setStatus("Forbinder...");
-        server = await device.gatt.connect();
+    async disconnect() {
+        if (this.device && this.device.gatt && this.device.gatt.connected) {
+            this.device.gatt.disconnect();
+        }
+    }
 
-        const service = await server.getPrimaryService(PYBRICKS_SERVICE);
-        commandChar = await service.getCharacteristic(PYBRICKS_COMMAND_EVENT_CHAR);
-        await commandChar.startNotifications();
-        commandChar.addEventListener("characteristicvaluechanged", onEvent);
+    _onEvent(event) {
+        const dv = event.target.value;
+        if (!dv || dv.byteLength < 1) return;
+        const data = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+        const evtId = data[0];
+        if (evtId === EVT_WRITE_STDOUT) {
+            const text = new TextDecoder().decode(data.subarray(1));
+            this.stdoutBuffer += text;
+            let idx;
+            while ((idx = this.stdoutBuffer.indexOf("\n")) >= 0) {
+                const line = this.stdoutBuffer.slice(0, idx).replace(/\r$/, "");
+                this.stdoutBuffer = this.stdoutBuffer.slice(idx + 1);
+                if (!line.length) continue;
+                if (this.onLine) this.onLine(line);
+                log(`${this.label}: ${line}`);
+            }
+        }
+    }
 
-        setStatus(`Forbundet: ${device.name}`, "ok");
-        log(`Forbundet til ${device.name}`);
-        setConnectedUi(true);
-    } catch (err) {
-        setStatus("Forbindelse fejlede", "error");
-        log("FEJL: " + (err && err.message ? err.message : String(err)));
-        setConnectedUi(false);
+    async writeStdin(text) {
+        if (!this.commandChar) throw new Error(`${this.label} ikke forbundet`);
+        const bytes = new TextEncoder().encode(text);
+        const CHUNK = 18;
+        for (let off = 0; off < bytes.length; off += CHUNK) {
+            const slice = bytes.subarray(off, off + CHUNK);
+            const frame = new Uint8Array(1 + slice.length);
+            frame[0] = CMD_WRITE_STDIN;
+            frame.set(slice, 1);
+            await this.commandChar.writeValueWithResponse(frame);
+        }
+    }
+
+    async startProgram() {
+        if (!this.commandChar) return;
+        await this.commandChar.writeValueWithResponse(new Uint8Array([CMD_START_USER_PROGRAM, 0]));
+        log(`${this.label}: START_USER_PROGRAM`);
+    }
+
+    async stopProgram() {
+        if (!this.commandChar) return;
+        await this.commandChar.writeValueWithResponse(new Uint8Array([CMD_STOP_USER_PROGRAM]));
+        log(`${this.label}: STOP_USER_PROGRAM`);
     }
 }
 
-function onDisconnected() {
-    setStatus("Afbrudt", "error");
-    log("Hub afbrød forbindelsen");
-    setConnectedUi(false);
-    commandChar = null;
-    server = null;
-}
+// ---------------- Hub instances ----------------
 
-async function disconnect() {
-    if (device && device.gatt && device.gatt.connected) {
-        device.gatt.disconnect();
-    }
-}
-
-function handleHubLine(line) {
-    // D <integer>  -> live distance from sled, encoded as tenths of a meter.
+const master = new HubConnection("master", "Puller Master", (line) => {
     if (line.startsWith("D ")) {
         const v = parseInt(line.slice(2).trim(), 10);
-        if (!Number.isNaN(v)) {
-            setDistance(v / 10);
-        }
+        if (!Number.isNaN(v)) setDistance(v / 10);
         return;
     }
-    // A <seq>  -> sled acknowledged command seq
     if (line.startsWith("A ")) {
         const v = parseInt(line.slice(2).trim(), 10);
-        if (!Number.isNaN(v) && ui.lastAck) {
-            ui.lastAck.textContent = String(v);
-        }
+        if (!Number.isNaN(v) && ui.lastAck) ui.lastAck.textContent = String(v);
         return;
     }
+});
+
+const sled = new HubConnection("sled", "Puller Sled", null);
+
+function refreshButtons() {
+    const m = master.isConnected();
+    const s = sled.isConnected();
+
+    setStatus(ui.status, m ? `Forbundet: ${master.device.name}` : "Ikke forbundet", m ? "ok" : "");
+    ui.connect.disabled = m;
+    ui.disconnect.disabled = !m;
+    ui.startProgram.disabled = !m;
+    ui.stopProgram.disabled = !m;
+    ui.sendScore.disabled = !m;
+    ui.fullPull.disabled = !m;
+    ui.sledButtons.forEach((b) => { b.disabled = !m; });
+
+    setStatus(ui.sledStatus, s ? `Forbundet: ${sled.device.name}` : "Ikke forbundet", s ? "ok" : "");
+    ui.sledConnect.disabled = s;
+    ui.sledDisconnect.disabled = !s;
+    ui.sledStart.disabled = !s;
+    ui.sledStop.disabled = !s;
+    // Push config goes via master broadcast → only requires master connection.
+    ui.sledPushCfg.disabled = !m;
 }
 
-function onEvent(event) {
-    const dv = event.target.value;
-    if (!dv || dv.byteLength < 1) return;
-    const data = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
-    const evtId = data[0];
+master.onStateChange = refreshButtons;
+sled.onStateChange = refreshButtons;
 
-    if (evtId === EVT_WRITE_STDOUT) {
-        const text = new TextDecoder().decode(data.subarray(1));
-        stdoutBuffer += text;
-        let idx;
-        while ((idx = stdoutBuffer.indexOf("\n")) >= 0) {
-            const line = stdoutBuffer.slice(0, idx).replace(/\r$/, "");
-            stdoutBuffer = stdoutBuffer.slice(idx + 1);
-            if (!line.length) continue;
-            handleHubLine(line);
-            log("hub: " + line);
-        }
-    } else if (evtId === EVT_STATUS_REPORT) {
-        // First 4 bytes after evtId are a uint32 bitfield of hub status flags.
-    } else {
-        log(`evt 0x${evtId.toString(16)} (${data.byteLength}B)`);
-    }
-}
-
-async function writeStdin(text) {
-    if (!commandChar) throw new Error("Not connected");
-    const bytes = new TextEncoder().encode(text);
-    const CHUNK = 18;
-    for (let offset = 0; offset < bytes.length; offset += CHUNK) {
-        const slice = bytes.subarray(offset, offset + CHUNK);
-        const frame = new Uint8Array(1 + slice.length);
-        frame[0] = CMD_WRITE_STDIN;
-        frame.set(slice, 1);
-        await commandChar.writeValueWithResponse(frame);
-    }
-}
+// ---------------- Score + sled commands (via master) ----------------
 
 async function sendScore(value) {
     const score = Math.max(0, Math.min(999, Number(value) || 0));
     const line = `S ${score}\n`;
     try {
-        await writeStdin(line);
+        await master.writeStdin(line);
         log("tx: " + line.trim());
     } catch (err) {
         log("FEJL ved send: " + (err && err.message ? err.message : err));
@@ -199,37 +238,84 @@ async function sendSledCommand(action, value) {
     const line = `C ${seq} ${actionId} ${v}\n`;
     if (ui.lastSeq) ui.lastSeq.textContent = String(seq);
     try {
-        await writeStdin(line);
+        await master.writeStdin(line);
         log(`tx: ${action}(${v}) seq=${seq}`);
     } catch (err) {
         log("FEJL sled-cmd: " + (err && err.message ? err.message : err));
     }
 }
 
-async function startProgram() {
-    if (!commandChar) return;
+// ---------------- Config (localStorage + push) ----------------
+
+const CFG_KEY = "ngtp-sled-config-v1";
+
+function loadConfig() {
     try {
-        await commandChar.writeValueWithResponse(new Uint8Array([CMD_START_USER_PROGRAM, 0]));
-        log("tx: START_USER_PROGRAM");
-    } catch (err) {
-        log("FEJL start: " + (err && err.message ? err.message : err));
-    }
+        const raw = localStorage.getItem(CFG_KEY);
+        if (raw) {
+            const c = JSON.parse(raw);
+            if (typeof c.ramp_end_m === "number") ui.cfgRamp.value = c.ramp_end_m;
+            if (typeof c.full_rotations === "number") ui.cfgRot.value = c.full_rotations;
+        }
+    } catch (e) { }
+    renderCfgLabels();
 }
 
-async function stopProgram() {
-    if (!commandChar) return;
-    try {
-        await commandChar.writeValueWithResponse(new Uint8Array([CMD_STOP_USER_PROGRAM]));
-        log("tx: STOP_USER_PROGRAM");
-    } catch (err) {
-        log("FEJL stop: " + (err && err.message ? err.message : err));
-    }
+function saveConfig() {
+    const c = {
+        ramp_end_m: Number(ui.cfgRamp.value),
+        full_rotations: Number(ui.cfgRot.value),
+    };
+    localStorage.setItem(CFG_KEY, JSON.stringify(c));
 }
 
-ui.connect.addEventListener("click", connect);
-ui.disconnect.addEventListener("click", disconnect);
-if (ui.startProgram) ui.startProgram.addEventListener("click", startProgram);
-if (ui.stopProgram) ui.stopProgram.addEventListener("click", stopProgram);
+function renderCfgLabels() {
+    ui.cfgRampVal.textContent = String(Number(ui.cfgRamp.value).toFixed(0));
+    ui.cfgRotVal.textContent = String(Number(ui.cfgRot.value).toFixed(1));
+}
+
+async function pushConfig() {
+    const rampM = Number(ui.cfgRamp.value);
+    const rot = Number(ui.cfgRot.value);
+    // Encode as tenths to match sled.py's int(value*10) protocol.
+    await sendSledCommand("set_ramp_end_m", Math.round(rampM * 10));
+    await sendSledCommand("set_full_rotations", Math.round(rot * 10));
+    log(`config pushed: ramp_end_m=${rampM} full_rotations=${rot}`);
+}
+
+// ---------------- Wire up UI ----------------
+
+ui.connect.addEventListener("click", async () => {
+    try { await master.connect(); }
+    catch (e) {
+        setStatus(ui.status, "Forbindelse fejlede", "error");
+        log("FEJL master: " + (e && e.message ? e.message : String(e)));
+    }
+});
+ui.disconnect.addEventListener("click", () => master.disconnect());
+ui.startProgram.addEventListener("click", async () => {
+    try { await master.startProgram(); } catch (e) { log("FEJL start: " + e.message); }
+});
+ui.stopProgram.addEventListener("click", async () => {
+    try { await master.stopProgram(); } catch (e) { log("FEJL stop: " + e.message); }
+});
+
+ui.sledConnect.addEventListener("click", async () => {
+    try { await sled.connect(); }
+    catch (e) {
+        setStatus(ui.sledStatus, "Forbindelse fejlede", "error");
+        log("FEJL sled: " + (e && e.message ? e.message : String(e)));
+    }
+});
+ui.sledDisconnect.addEventListener("click", () => sled.disconnect());
+ui.sledStart.addEventListener("click", async () => {
+    try { await sled.startProgram(); } catch (e) { log("FEJL sled start: " + e.message); }
+});
+ui.sledStop.addEventListener("click", async () => {
+    try { await sled.stopProgram(); } catch (e) { log("FEJL sled stop: " + e.message); }
+});
+ui.sledPushCfg.addEventListener("click", () => pushConfig());
+
 ui.sendScore.addEventListener("click", () => sendScore(ui.score.value));
 ui.fullPull.addEventListener("click", () => sendScore(10000));
 
@@ -246,7 +332,14 @@ ui.sledButtons.forEach((btn) => {
     });
 });
 
-// Register service worker for PWA install (optional, fails silently in dev).
+[ui.cfgRamp, ui.cfgRot].forEach((el) => {
+    el.addEventListener("input", () => { renderCfgLabels(); saveConfig(); });
+});
+
+loadConfig();
+refreshButtons();
+
+// Register service worker for PWA install.
 if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
         navigator.serviceWorker.register("./sw.js").catch(() => { });

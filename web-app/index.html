@@ -18,9 +18,9 @@
         </header>
 
         <section class="card">
-            <h2>Forbindelse</h2>
+            <h2>Master-hub</h2>
             <div class="row">
-                <button id="btn-connect" class="btn btn-primary">Forbind til Puller Master</button>
+                <button id="btn-connect" class="btn btn-primary">Forbind Master</button>
                 <button id="btn-disconnect" class="btn" disabled>Afbryd</button>
             </div>
             <div class="row">
@@ -29,14 +29,41 @@
             </div>
             <p>Status: <span id="status" class="status">Ikke forbundet</span></p>
             <p class="hint">
-                Kræver Chrome eller Edge på Android. Siden skal være serveret over HTTPS
-                (eller localhost). Rigtig rækkefølge:
-                <strong>1)</strong> boot hubben (lad være med at trykke knappen),
-                <strong>2)</strong> tryk Forbind,
-                <strong>3)</strong> tryk Start program.
-                Når master broadcaster, kan ingen nye centrals forbinde — derfor skal forbindelsen
-                etableres før programmet starter.
+                <strong>Rækkefølge:</strong> boot hub (kort tryk) →
+                Forbind → Start program. Når master broadcaster, kan ingen
+                nye centrals forbinde, så connection skal etableres først.
             </p>
+        </section>
+
+        <section class="card">
+            <h2>Sled-hub</h2>
+            <div class="row">
+                <button id="btn-sled-connect" class="btn btn-primary">Forbind Sled</button>
+                <button id="btn-sled-disconnect" class="btn" disabled>Afbryd</button>
+            </div>
+            <div class="row">
+                <button id="btn-sled-start" class="btn" disabled>Start program</button>
+                <button id="btn-sled-stop" class="btn" disabled>Stop program</button>
+                <button id="btn-push-config" class="btn" disabled>Push config</button>
+            </div>
+            <p>Status: <span id="sled-status" class="status">Ikke forbundet</span></p>
+            <p class="hint">
+                Sled-programmet skal også startes for at modtage broadcast fra master.
+                "Push config" sender ramp-end &amp; full-rotations til sled via master.
+            </p>
+        </section>
+
+        <section class="card">
+            <h2>Sled config</h2>
+            <div class="config-row">
+                <label for="cfg-ramp">Vægt-rampe slutter ved <span id="cfg-ramp-val">70</span> m</label>
+                <input id="cfg-ramp" type="range" min="5" max="100" step="1" value="70" />
+            </div>
+            <div class="config-row">
+                <label for="cfg-rot">Encoder-omdrejninger pr. 100 m: <span id="cfg-rot-val">43.0</span></label>
+                <input id="cfg-rot" type="range" min="1" max="200" step="0.5" value="43" />
+            </div>
+            <p class="hint">Gemmes lokalt på telefonen. Tryk "Push config" på sled-kortet for at sende til hubben.</p>
         </section>
 
         <section class="card">
