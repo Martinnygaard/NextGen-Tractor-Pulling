@@ -341,6 +341,13 @@ ui.hubsBtn.addEventListener("click", () => ui.hubDialog.showModal());
 ui.manualBtn.addEventListener("click", () => ui.manualDialog.showModal());
 ui.settingsBtn.addEventListener("click", () => ui.settingsDialog.showModal());
 
+document.querySelectorAll("[data-close-dialog]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+        const dlg = btn.closest("dialog");
+        if (dlg) dlg.close();
+    });
+});
+
 ui.connect.addEventListener("click", async () => {
     try { await master.connect(); }
     catch (e) {

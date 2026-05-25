@@ -26,10 +26,10 @@
 
         <!-- Hub-forbindelser dialog -->
         <dialog id="hub-dialog" class="modal">
-            <form method="dialog" class="modal-form">
+            <div class="modal-form">
                 <header class="modal-header">
                     <h2>Hub-forbindelser</h2>
-                    <button type="submit" class="btn btn-close" value="close">Luk</button>
+                    <button type="button" class="btn btn-close" data-close-dialog>Luk</button>
                 </header>
 
                 <div class="hub-block">
@@ -67,15 +67,15 @@
                     <strong>Rækkefølge:</strong> boot hub (kort tryk) → Forbind → Start program.
                     Når en hub broadcaster, kan ingen nye forbindelser oprettes, så forbind først.
                 </p>
-            </form>
+            </div>
         </dialog>
 
         <!-- Settings dialog -->
         <dialog id="settings-dialog" class="modal">
-            <form method="dialog" class="modal-form">
+            <div class="modal-form">
                 <header class="modal-header">
                     <h2>Settings</h2>
-                    <button type="submit" class="btn btn-close" value="close">Luk</button>
+                    <button type="button" class="btn btn-close" data-close-dialog>Luk</button>
                 </header>
 
                 <div class="config-row">
@@ -91,15 +91,15 @@
                     <button type="button" id="btn-push-config-2" class="btn btn-primary">Push til hub</button>
                 </div>
                 <p class="hint">Gemmes lokalt på telefonen. "Push til hub" kræver at master er forbundet.</p>
-            </form>
+            </div>
         </dialog>
 
         <!-- Manual dialog -->
         <dialog id="manual-dialog" class="modal">
-            <form method="dialog" class="modal-form">
+            <div class="modal-form">
                 <header class="modal-header">
                     <h2>Manuel styring</h2>
-                    <button type="submit" class="btn btn-close" value="close">Luk</button>
+                    <button type="button" class="btn btn-close" data-close-dialog>Luk</button>
                 </header>
 
                 <div class="hub-block">
@@ -150,7 +150,7 @@
                             disabled>Sluk</button>
                     </div>
                 </div>
-            </form>
+            </div>
         </dialog>
 
         <!-- Live afstand -->
