@@ -43,8 +43,8 @@ function log(line) {
 function setConnectedUi(connected) {
     ui.connect.disabled = connected;
     ui.disconnect.disabled = !connected;
-    ui.startProgram.disabled = !connected;
-    ui.stopProgram.disabled = !connected;
+    if (ui.startProgram) ui.startProgram.disabled = !connected;
+    if (ui.stopProgram) ui.stopProgram.disabled = !connected;
     ui.sendScore.disabled = !connected;
     ui.fullPull.disabled = !connected;
 }
@@ -168,8 +168,8 @@ async function stopProgram() {
 
 ui.connect.addEventListener("click", connect);
 ui.disconnect.addEventListener("click", disconnect);
-ui.startProgram.addEventListener("click", startProgram);
-ui.stopProgram.addEventListener("click", stopProgram);
+if (ui.startProgram) ui.startProgram.addEventListener("click", startProgram);
+if (ui.stopProgram) ui.stopProgram.addEventListener("click", stopProgram);
 ui.sendScore.addEventListener("click", () => sendScore(ui.score.value));
 ui.fullPull.addEventListener("click", () => sendScore(10000));
 
