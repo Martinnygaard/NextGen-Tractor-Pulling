@@ -487,8 +487,6 @@ function renderScoreboard() {
     const rows = [...scoreboard].sort((a, b) => b.time - a.time);
     for (const e of rows) {
         const tr = document.createElement("tr");
-        const tdTime = document.createElement("td");
-        tdTime.textContent = fmtTime(e.time);
         const tdName = document.createElement("td");
         tdName.textContent = e.name || "";
         const tdWeight = document.createElement("td");
@@ -502,7 +500,7 @@ function renderScoreboard() {
         btn.dataset.id = e.id;
         btn.textContent = "✎";
         tdEdit.appendChild(btn);
-        tr.append(tdTime, tdName, tdWeight, tdDist, tdEdit);
+        tr.append(tdName, tdWeight, tdDist, tdEdit);
         tbody.appendChild(tr);
     }
 

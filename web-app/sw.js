@@ -1,6 +1,6 @@
 // Minimal service worker so the page can be installed as a PWA on Android.
 // Network-first; no aggressive caching while the app is still evolving.
-const CACHE = "ngtp-web-bt-v11";
+const CACHE = "ngtp-web-bt-v12";
 const ASSETS = [
     "./",
     "./index.html",
