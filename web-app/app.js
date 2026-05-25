@@ -182,6 +182,7 @@ class HubConnection {
             this.hasStatus = false;
             this.flashing = false;
             this.actualVersion = null;
+            this._cmdUseNoResp = undefined;
             this.onStateChange();
         });
         this.server = await this.device.gatt.connect();
@@ -276,19 +277,41 @@ class HubConnection {
             const frame = new Uint8Array(1 + slice.length);
             frame[0] = CMD_WRITE_STDIN;
             frame.set(slice, 1);
-            await this.commandChar.writeValueWithResponse(frame);
+            await this._writeCommand(frame);
         }
+    }
+
+    async _writeCommand(buf) {
+        // pybricks-code uses writeValueWithoutResponse on the command char.
+        // Some hubs report only "write" in Chrome but still accept the
+        // no-response write (Chrome property enumeration bug), and crucially
+        // a write-with-response on these hubs fails with "GATT Error
+        // Unknown" for commands that trigger slow firmware work like
+        // WRITE_USER_PROGRAM_META. So try without-response first, fall back.
+        if (!this.commandChar) throw new Error(`${this.label} ikke forbundet`);
+        if (this._cmdUseNoResp !== false) {
+            try {
+                await this.commandChar.writeValueWithoutResponse(buf);
+                return;
+            } catch (e) {
+                if (this._cmdUseNoResp === undefined) {
+                    log(`${this.label}: write-without-response gav ${e && e.message ? e.message : e}, falder tilbage til with-response`);
+                }
+                this._cmdUseNoResp = false;
+            }
+        }
+        await this.commandChar.writeValueWithResponse(buf);
     }
 
     async startProgram() {
         if (!this.commandChar) return;
-        await this.commandChar.writeValueWithResponse(new Uint8Array([CMD_START_USER_PROGRAM, 0]));
+        await this._writeCommand(new Uint8Array([CMD_START_USER_PROGRAM, 0]));
         log(`${this.label}: START_USER_PROGRAM`);
     }
 
     async stopProgram() {
         if (!this.commandChar) return;
-        await this.commandChar.writeValueWithResponse(new Uint8Array([CMD_STOP_USER_PROGRAM]));
+        await this._writeCommand(new Uint8Array([CMD_STOP_USER_PROGRAM]));
         log(`${this.label}: STOP_USER_PROGRAM`);
     }
 
@@ -338,25 +361,10 @@ class HubConnection {
             const totalChunks = Math.ceil(data.length / chunkSize);
             log(`${this.label}: flasher ${data.length} bytes i ${totalChunks} chunks à ${chunkSize}`);
 
-            // pybricksdev writes to the command characteristic *without*
-            // response (response=False). Some hubs we have seen will accept
-            // writes-with-response but Display 2 reliably fails META with
-            // "GATT Error Unknown" when we ask for a response. Use the
-            // no-response path everywhere; fall back to with-response only
-            // if the characteristic does not advertise WriteWithoutResponse.
-            const cc = this.commandChar;
-            const wantsNoResp = cc.properties && cc.properties.writeWithoutResponse;
-            const writeChar = async (buf) => {
-                if (wantsNoResp) {
-                    try {
-                        await cc.writeValueWithoutResponse(buf);
-                        return;
-                    } catch (e) {
-                        // fall through to with-response
-                    }
-                }
-                await cc.writeValueWithResponse(buf);
-            };
+            // pybricks-code (the official IDE) writes to the command
+            // characteristic using writeValueWithoutResponse. We do the same
+            // via _writeCommand, which probes once on the first call and
+            // caches whether the fast path works on this hub.
 
             // 1. WRITE_USER_PROGRAM_META with total size. Retry once on
             //    failure — the very first write right after STOP sometimes
@@ -366,11 +374,11 @@ class HubConnection {
                 buf[0] = CMD_WRITE_USER_PROGRAM_META;
                 new DataView(buf.buffer).setUint32(1, data.length, true);
                 try {
-                    await writeChar(buf);
+                    await this._writeCommand(buf);
                 } catch (e) {
                     log(`${this.label}: META retry efter ${e && e.message ? e.message : e}`);
                     await new Promise((r) => setTimeout(r, 800));
-                    await writeChar(buf);
+                    await this._writeCommand(buf);
                 }
             }
 
@@ -382,7 +390,7 @@ class HubConnection {
                 buf[0] = CMD_WRITE_USER_RAM;
                 new DataView(buf.buffer).setUint32(1, off, true);
                 buf.set(slice, overhead);
-                await writeChar(buf);
+                await this._writeCommand(buf);
                 this.flashProgress = end / data.length;
                 this.onStateChange();
             }
