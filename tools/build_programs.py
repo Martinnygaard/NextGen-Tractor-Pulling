@@ -121,6 +121,22 @@ async def main() -> int:
     )
     print(f"\nWrote {out_dir / 'manifest.json'} ({len(manifest['programs'])} entries)")
 
+    # Substitute __NGTP_VERSION__ in web-app static files so every CI deploy
+    # produces fresh asset URLs (?v=<sha>) and a unique SW cache name. This
+    # is what makes the PWA actually pick up new code on installed devices,
+    # bypassing the long GitHub Pages HTTP cache for app.js/style.css.
+    web_root = repo_root / "web-app"
+    for rel in ("index.html", "sw.js"):
+        path = web_root / rel
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if VERSION_PLACEHOLDER in text:
+            path.write_text(
+                text.replace(VERSION_PLACEHOLDER, version), encoding="utf-8"
+            )
+            print(f"Stamped {rel} with v={version}")
+
     return 1 if failed else 0
 
 
