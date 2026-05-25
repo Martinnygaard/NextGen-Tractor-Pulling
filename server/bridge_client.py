@@ -180,6 +180,8 @@ class PybricksExecAdapter(BaseAdapter):
         self._hub_states = {}       # label -> dict
         self._reconnect_in_progress = set()
         self._reboot_in_progress = set()
+        self._release_in_progress = set()
+        self._released = set()          # labels explicitly released; skip auto-reconnect
         self._last_auto_reconnect = {}  # label -> ts of last auto attempt
         self._connected_event = threading.Event()
         self._connect_error = None
@@ -206,9 +208,56 @@ class PybricksExecAdapter(BaseAdapter):
             return False
         if label in self._reconnect_in_progress:
             return False
+        # Manual reconnect cancels any prior release so auto-reconnect resumes.
+        self._released.discard(label)
         self._reconnect_in_progress.add(label)
         asyncio.run_coroutine_threadsafe(self._reconnect_label(label), self._loop)
         return True
+
+    def request_release(self, label):
+        """Disconnect from a hub and stop trying to reconnect until the user
+        clicks 'Forbind' again. Lets another central (e.g. a phone over Web
+        Bluetooth) claim the hub."""
+        if self._loop is None:
+            return False
+        if label in self._release_in_progress:
+            return False
+        self._release_in_progress.add(label)
+        asyncio.run_coroutine_threadsafe(self._release_label(label), self._loop)
+        return True
+
+    async def _release_label(self, label):
+        try:
+            self._released.add(label)
+            if label == "master":
+                name = self.scoreboard_hub
+                if self._hub is not None:
+                    try:
+                        await self._hub.disconnect()
+                    except Exception:
+                        pass
+                    self._hub = None
+                self._connected_event.clear()
+                self._set_hub_state("master", name, False, "released")
+                print("Bridge: master released (phone can now connect)")
+            else:
+                cfg = self._aux_config.get(label)
+                name = cfg[0] if cfg else ""
+                for i, (lab, h) in enumerate(list(self._aux_hubs)):
+                    if lab == label:
+                        try:
+                            await h.disconnect()
+                        except Exception:
+                            pass
+                        try:
+                            self._aux_hubs.pop(i)
+                        except Exception:
+                            pass
+                        break
+                self._set_hub_state(label, name, False, "released")
+                print("Bridge: %s released" % label)
+        finally:
+            self._release_in_progress.discard(label)
 
     def request_reboot(self, label):
         """Re-run the user program on the hub without re-establishing BLE.
@@ -742,13 +791,24 @@ def _status_reporter(client, adapter, stop_event):
                     print("Bridge: reboot requested for '%s'" % label)
                 except Exception as exc:
                     print("Bridge: reboot handling failed for %s: %r" % (label, exc))
+            for label in data.get("release", []) or []:
+                try:
+                    if hasattr(adapter, "request_release"):
+                        adapter.request_release(label)
+                    client.post_json("/api/bridge-control/ack/release/%s" % label)
+                    print("Bridge: release requested for '%s'" % label)
+                except Exception as exc:
+                    print("Bridge: release handling failed for %s: %r" % (label, exc))
             # Auto-retry reconnect for stuck-offline aux hubs so the UI pill
             # turns green again once the hub comes back.
             now = time.time()
             last_attempts = getattr(adapter, "_last_auto_reconnect", None)
+            released = getattr(adapter, "_released", set())
             for h in hubs:
                 label = h.get("label")
                 if not label or label == "master":
+                    continue
+                if label in released:
                     continue
                 if h.get("connected"):
                     if last_attempts is not None:

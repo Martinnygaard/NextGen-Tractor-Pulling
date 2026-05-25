@@ -127,6 +127,7 @@ bridge_hubs: list[HubStatus] = []
 bridge_status_ts: float = 0.0
 reconnect_requests: set[str] = set()
 reboot_requests: set[str] = set()
+release_requests: set[str] = set()
 
 
 def now_iso() -> str:
@@ -421,11 +422,18 @@ def request_reboot(label: str) -> dict:
     return {"ok": True, "label": label, "pending": sorted(reboot_requests)}
 
 
+@app.post("/api/bridge-control/release/{label}")
+def request_release(label: str) -> dict:
+    release_requests.add(label)
+    return {"ok": True, "label": label, "pending": sorted(release_requests)}
+
+
 @app.get("/api/bridge-control")
 def get_bridge_control() -> dict:
     return {
         "reconnect": sorted(reconnect_requests),
         "reboot": sorted(reboot_requests),
+        "release": sorted(release_requests),
     }
 
 
@@ -435,6 +443,8 @@ def ack_control(kind: str, label: str) -> dict:
         reconnect_requests.discard(label)
     elif kind == "reboot":
         reboot_requests.discard(label)
+    elif kind == "release":
+        release_requests.discard(label)
     else:
         return {"ok": False, "error": "unknown kind"}
     return {"ok": True, "kind": kind, "label": label}

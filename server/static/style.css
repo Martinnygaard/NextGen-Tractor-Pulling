@@ -176,6 +176,13 @@ body {
   padding: 6px 12px;
   font-size: 0.85rem;
 }
+.btn-release {
+  background: #4c1d95;
+  color: #ddd6fe;
+  border: 1px solid #8b5cf6;
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
 .btn-close {
   background: transparent;
   color: var(--muted);

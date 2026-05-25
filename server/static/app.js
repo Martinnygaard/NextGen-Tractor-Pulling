@@ -75,6 +75,7 @@ function renderHubDialog() {
         <span class="hub-badge ${status}">${h.connected ? "Forbundet" : "Afbrudt"}</span>
         <button type="button" class="btn btn-reconnect" data-action="reconnect" data-label="${h.label}">Forbind</button>
         <button type="button" class="btn btn-reboot" data-action="reboot" data-label="${h.label}">Reboot</button>
+        <button type="button" class="btn btn-release" data-action="release" data-label="${h.label}" title="Frigør hubben så en anden enhed (fx telefon) kan forbinde">Slip</button>
       </div>
       ${h.error ? `<div class="hub-error">${h.error}</div>` : ""}
     `;
