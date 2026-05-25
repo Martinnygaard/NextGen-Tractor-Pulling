@@ -67,6 +67,25 @@ const ui = {
     cfgRampVal: document.getElementById("cfg-ramp-val"),
     cfgRot: document.getElementById("cfg-rot"),
     cfgRotVal: document.getElementById("cfg-rot-val"),
+    cfgPlates: document.getElementById("cfg-plates"),
+    cfgPlatesVal: document.getElementById("cfg-plates-val"),
+    cfgWeightDisplay: document.getElementById("cfg-weight-display"),
+    btnPlatesPlus: document.getElementById("btn-plates-plus"),
+    btnPlatesMinus: document.getElementById("btn-plates-minus"),
+
+    // Scoreboard
+    entryName: document.getElementById("entry-name"),
+    btnAddEntry: document.getElementById("btn-add-entry"),
+    entryWeightPreview: document.getElementById("entry-weight-preview"),
+    scoreboardBody: document.getElementById("scoreboard-body"),
+    knownNames: document.getElementById("known-names"),
+    editDialog: document.getElementById("edit-dialog"),
+    editTime: document.getElementById("edit-time"),
+    editName: document.getElementById("edit-name"),
+    editWeight: document.getElementById("edit-weight"),
+    editDistance: document.getElementById("edit-distance"),
+    btnEditSave: document.getElementById("btn-edit-save"),
+    btnEditDelete: document.getElementById("btn-edit-delete"),
 };
 
 let cmdSeq = 0;
@@ -301,6 +320,15 @@ async function sendSledCommand(action, value) {
 // ---------------- Config ----------------
 
 const CFG_KEY = "ngtp-sled-config-v1";
+const PLATE_WEIGHT_G = 41;
+
+function plateCount() {
+    return Math.max(0, Math.round(Number(ui.cfgPlates.value) || 0));
+}
+
+function plateWeightG() {
+    return plateCount() * PLATE_WEIGHT_G;
+}
 
 function loadConfig() {
     try {
@@ -309,6 +337,7 @@ function loadConfig() {
             const c = JSON.parse(raw);
             if (typeof c.ramp_end_m === "number") ui.cfgRamp.value = c.ramp_end_m;
             if (typeof c.full_rotations === "number") ui.cfgRot.value = c.full_rotations;
+            if (typeof c.plates === "number") ui.cfgPlates.value = c.plates;
         }
     } catch (e) { }
     renderCfgLabels();
@@ -318,6 +347,7 @@ function saveConfig() {
     const c = {
         ramp_end_m: Number(ui.cfgRamp.value),
         full_rotations: Number(ui.cfgRot.value),
+        plates: plateCount(),
     };
     localStorage.setItem(CFG_KEY, JSON.stringify(c));
 }
@@ -325,6 +355,9 @@ function saveConfig() {
 function renderCfgLabels() {
     ui.cfgRampVal.textContent = String(Number(ui.cfgRamp.value).toFixed(0));
     ui.cfgRotVal.textContent = String(Number(ui.cfgRot.value).toFixed(1));
+    if (ui.cfgPlatesVal) ui.cfgPlatesVal.textContent = String(plateCount());
+    if (ui.cfgWeightDisplay) ui.cfgWeightDisplay.textContent = String(plateWeightG());
+    if (ui.entryWeightPreview) ui.entryWeightPreview.textContent = String(plateWeightG());
 }
 
 async function pushConfig() {
@@ -400,7 +433,157 @@ ui.sledButtons.forEach((btn) => {
     el.addEventListener("input", () => { renderCfgLabels(); saveConfig(); });
 });
 
+// Plate count +/- and input
+function setPlates(n) {
+    ui.cfgPlates.value = Math.max(0, Math.round(n));
+    renderCfgLabels();
+    saveConfig();
+}
+ui.cfgPlates.addEventListener("input", () => { renderCfgLabels(); saveConfig(); });
+ui.btnPlatesPlus.addEventListener("click", () => setPlates(plateCount() + 1));
+ui.btnPlatesMinus.addEventListener("click", () => setPlates(plateCount() - 1));
+
+// ---------------- Scoreboard ----------------
+
+const SCOREBOARD_KEY = "ngtp-scoreboard-v1";
+let scoreboard = [];
+let editingId = null;
+
+function loadScoreboard() {
+    try {
+        const raw = localStorage.getItem(SCOREBOARD_KEY);
+        if (raw) scoreboard = JSON.parse(raw) || [];
+    } catch (e) { scoreboard = []; }
+    renderScoreboard();
+}
+
+function saveScoreboardStore() {
+    localStorage.setItem(SCOREBOARD_KEY, JSON.stringify(scoreboard));
+}
+
+function getLiveDistanceM() {
+    const txt = ui.distance.textContent.trim();
+    const m = txt.match(/-?\d+(\.\d+)?/);
+    return m ? Number(m[0]) : 0;
+}
+
+function newId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+}
+
+function fmtTime(ms) {
+    return new Date(ms).toLocaleString("da-DK", { hour12: false });
+}
+
+function fmtWeight(g) {
+    if (g >= 1000) return (g / 1000).toFixed(2) + " kg";
+    return g + " g";
+}
+
+function renderScoreboard() {
+    const tbody = ui.scoreboardBody;
+    if (!tbody) return;
+    tbody.innerHTML = "";
+    const rows = [...scoreboard].sort((a, b) => b.time - a.time);
+    for (const e of rows) {
+        const tr = document.createElement("tr");
+        const tdTime = document.createElement("td");
+        tdTime.textContent = fmtTime(e.time);
+        const tdName = document.createElement("td");
+        tdName.textContent = e.name || "";
+        const tdWeight = document.createElement("td");
+        tdWeight.textContent = fmtWeight(e.weight_g || 0);
+        const tdDist = document.createElement("td");
+        tdDist.textContent = (Number(e.distance_m) || 0).toFixed(1) + " m";
+        const tdEdit = document.createElement("td");
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "btn btn-edit";
+        btn.dataset.id = e.id;
+        btn.textContent = "✎";
+        tdEdit.appendChild(btn);
+        tr.append(tdTime, tdName, tdWeight, tdDist, tdEdit);
+        tbody.appendChild(tr);
+    }
+
+    // Datalist of known names
+    if (ui.knownNames) {
+        const names = [...new Set(scoreboard.map((s) => (s.name || "").trim()).filter(Boolean))].sort();
+        ui.knownNames.innerHTML = "";
+        for (const n of names) {
+            const opt = document.createElement("option");
+            opt.value = n;
+            ui.knownNames.appendChild(opt);
+        }
+    }
+}
+
+function addEntry() {
+    const name = (ui.entryName.value || "").trim();
+    if (!name) {
+        ui.entryName.focus();
+        return;
+    }
+    const entry = {
+        id: newId(),
+        time: Date.now(),
+        name,
+        weight_g: plateWeightG(),
+        distance_m: getLiveDistanceM(),
+    };
+    scoreboard.push(entry);
+    saveScoreboardStore();
+    renderScoreboard();
+    ui.entryName.value = "";
+}
+
+function localIsoForInput(ms) {
+    const d = new Date(ms);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function openEdit(id) {
+    const e = scoreboard.find((x) => x.id === id);
+    if (!e) return;
+    editingId = id;
+    ui.editTime.value = localIsoForInput(e.time);
+    ui.editName.value = e.name || "";
+    ui.editWeight.value = e.weight_g || 0;
+    ui.editDistance.value = (Number(e.distance_m) || 0).toFixed(1);
+    ui.editDialog.showModal();
+}
+
+function saveEdit() {
+    const e = scoreboard.find((x) => x.id === editingId);
+    if (!e) return;
+    const t = ui.editTime.value ? new Date(ui.editTime.value).getTime() : e.time;
+    e.time = Number.isFinite(t) ? t : e.time;
+    e.name = (ui.editName.value || "").trim();
+    e.weight_g = Math.max(0, Math.round(Number(ui.editWeight.value) || 0));
+    e.distance_m = Math.max(0, Number(ui.editDistance.value) || 0);
+    saveScoreboardStore();
+    renderScoreboard();
+    ui.editDialog.close();
+}
+
+function deleteEdit() {
+    scoreboard = scoreboard.filter((x) => x.id !== editingId);
+    saveScoreboardStore();
+    renderScoreboard();
+    ui.editDialog.close();
+}
+
+ui.btnAddEntry.addEventListener("click", addEntry);
+ui.scoreboardBody.addEventListener("click", (ev) => {
+    const btn = ev.target.closest(".btn-edit");
+    if (btn) openEdit(btn.dataset.id);
+});
+ui.btnEditSave.addEventListener("click", saveEdit);
+ui.btnEditDelete.addEventListener("click", deleteEdit);
+
 loadConfig();
+loadScoreboard();
 refreshUi();
 
 if ("serviceWorker" in navigator) {

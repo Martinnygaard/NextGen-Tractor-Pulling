@@ -86,6 +86,15 @@
                     <label for="cfg-rot">Encoder-omdrejninger pr. 100 m: <span id="cfg-rot-val">43.0</span></label>
                     <input id="cfg-rot" type="range" min="1" max="200" step="0.5" value="43" />
                 </div>
+                <div class="config-row">
+                    <label for="cfg-plates">Antal vægtplader: <span id="cfg-plates-val">0</span> × 41 g =
+                        <strong><span id="cfg-weight-display">0</span> g</strong></label>
+                    <div class="row plates-row">
+                        <button type="button" id="btn-plates-minus" class="btn">−</button>
+                        <input id="cfg-plates" type="number" min="0" max="500" step="1" value="0" />
+                        <button type="button" id="btn-plates-plus" class="btn">+</button>
+                    </div>
+                </div>
 
                 <div class="row">
                     <button type="button" id="btn-push-config-2" class="btn btn-primary">Push til hub</button>
@@ -154,6 +163,62 @@
                 <button id="btn-full-pull" class="btn btn-warning" disabled>FULL PULL</button>
             </div>
         </section>
+
+        <!-- Scoreboard -->
+        <section class="card">
+            <h2>Scoreboard</h2>
+            <div class="row entry-row">
+                <input id="entry-name" type="text" list="known-names" placeholder="Navn" autocomplete="off" />
+                <datalist id="known-names"></datalist>
+                <button type="button" id="btn-add-entry" class="btn btn-primary">Gem træk</button>
+            </div>
+            <div class="sub entry-hint">Vejer <span id="entry-weight-preview">0</span> g · distance fra live
+                måling</div>
+            <div class="table-wrap">
+                <table class="scoreboard">
+                    <thead>
+                        <tr>
+                            <th>Tid</th>
+                            <th>Navn</th>
+                            <th>Vægt</th>
+                            <th>Distance</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="scoreboard-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Edit entry dialog -->
+        <dialog id="edit-dialog" class="modal">
+            <div class="modal-form">
+                <header class="modal-header">
+                    <h2>Rediger træk</h2>
+                    <button type="button" class="btn btn-close" data-close-dialog>Luk</button>
+                </header>
+                <div class="config-row">
+                    <label for="edit-time">Tidspunkt</label>
+                    <input id="edit-time" type="datetime-local" step="1" />
+                </div>
+                <div class="config-row">
+                    <label for="edit-name">Navn</label>
+                    <input id="edit-name" type="text" list="known-names" autocomplete="off" />
+                </div>
+                <div class="config-row">
+                    <label for="edit-weight">Vægt (g)</label>
+                    <input id="edit-weight" type="number" min="0" step="1" />
+                </div>
+                <div class="config-row">
+                    <label for="edit-distance">Distance (m)</label>
+                    <input id="edit-distance" type="number" min="0" step="0.1" />
+                </div>
+                <div class="row">
+                    <button type="button" id="btn-edit-save" class="btn btn-primary">Gem</button>
+                    <button type="button" id="btn-edit-delete" class="btn btn-warning">Slet</button>
+                </div>
+            </div>
+        </dialog>
 
         <!-- Log (collapsible) -->
         <details class="card">
