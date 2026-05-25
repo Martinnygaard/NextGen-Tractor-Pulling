@@ -229,10 +229,17 @@ def run_display_hub(hub_index, rotations):
         message = hub.ble.observe(CHANNEL)
 
         # Master broadcasts a tuple (score, cmd_seq, cmd_action, cmd_value).
-        # Displays only care about the score (first element). Plain ints from
-        # legacy masters are also accepted.
-        if isinstance(message, tuple) and len(message) > 0:
+        # Displays only care about the score (first element). Plain ints
+        # from legacy masters are also accepted. Defensively unwrap nested
+        # tuples and coerce to int so a malformed/stale broadcast can never
+        # smuggle a tuple into the numeric comparisons below.
+        while isinstance(message, tuple) and len(message) > 0:
             message = message[0]
+        if message is not None:
+            try:
+                message = int(message)
+            except Exception:
+                message = None
 
         if message is not None:
             last_message = message
