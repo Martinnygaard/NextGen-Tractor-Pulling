@@ -5,7 +5,13 @@ const PYBRICKS_COMMAND_EVENT_CHAR = "c5f50002-8280-46da-89f4-6d8051e4aeef";
 const CMD_STOP_USER_PROGRAM = 0x00;
 const CMD_START_USER_PROGRAM = 0x01;
 const CMD_WRITE_STDIN = 0x06;
+const EVT_STATUS_REPORT = 0x00;
 const EVT_WRITE_STDOUT = 0x01;
+
+// Pybricks status flag bits (uint32 bitfield in EVT_STATUS_REPORT).
+const STATUS_USER_PROGRAM_RUNNING = 1 << 6;
+const STATUS_BLE_ADVERTISING = 1 << 3;
+const STATUS_BATTERY_LOW = 1 << 0;
 
 const SLED_ACTIONS = {
     start_pull: 1,
@@ -93,11 +99,17 @@ class HubConnection {
         this.server = null;
         this.commandChar = null;
         this.stdoutBuffer = "";
+        this.statusFlags = 0;
+        this.hasStatus = false;
         this.onStateChange = () => { };
     }
 
     isConnected() {
         return !!this.commandChar;
+    }
+
+    isProgramRunning() {
+        return !!(this.statusFlags & STATUS_USER_PROGRAM_RUNNING);
     }
 
     async connect() {
@@ -112,6 +124,8 @@ class HubConnection {
             log(`${this.label}: afbrudt`);
             this.commandChar = null;
             this.server = null;
+            this.statusFlags = 0;
+            this.hasStatus = false;
             this.onStateChange();
         });
         this.server = await this.device.gatt.connect();
@@ -134,6 +148,20 @@ class HubConnection {
         if (!dv || dv.byteLength < 1) return;
         const data = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
         const evtId = data[0];
+        if (evtId === EVT_STATUS_REPORT) {
+            if (data.byteLength >= 5) {
+                // uint32 little-endian status bitfield.
+                const flags = data[1] | (data[2] << 8) | (data[3] << 16) | (data[4] << 24);
+                const prev = this.statusFlags;
+                this.statusFlags = flags >>> 0;
+                this.hasStatus = true;
+                if (((prev ^ flags) & STATUS_USER_PROGRAM_RUNNING) !== 0) {
+                    log(`${this.label}: program ${this.isProgramRunning() ? "kører" : "stoppet"}`);
+                }
+                this.onStateChange();
+            }
+            return;
+        }
         if (evtId === EVT_WRITE_STDOUT) {
             const text = new TextDecoder().decode(data.subarray(1));
             this.stdoutBuffer += text;
@@ -191,6 +219,19 @@ const master = new HubConnection("master", "Puller Master", (line) => {
 
 const sled = new HubConnection("sled", "Puller Sled", null);
 
+function hubStatusText(hub) {
+    if (!hub.isConnected()) return "Ikke forbundet";
+    const name = hub.device ? hub.device.name : "";
+    if (!hub.hasStatus) return `Forbundet: ${name} · venter på status`;
+    return `Forbundet: ${name} · ${hub.isProgramRunning() ? "Program kører" : "Idle"}`;
+}
+
+function hubStatusKind(hub) {
+    if (!hub.isConnected()) return "";
+    if (!hub.hasStatus) return "ok";
+    return hub.isProgramRunning() ? "running" : "ok";
+}
+
 function refreshUi() {
     const m = master.isConnected();
     const s = sled.isConnected();
@@ -201,18 +242,18 @@ function refreshUi() {
     ui.hubsBtn.dataset.kind = count === 2 ? "ok" : (count === 0 ? "off" : "partial");
 
     // Master block
-    setStatus(ui.status, m ? `Forbundet: ${master.device.name}` : "Ikke forbundet", m ? "ok" : "");
+    setStatus(ui.status, hubStatusText(master), hubStatusKind(master));
     ui.connect.disabled = m;
     ui.disconnect.disabled = !m;
-    ui.startProgram.disabled = !m;
-    ui.stopProgram.disabled = !m;
+    ui.startProgram.disabled = !m || master.isProgramRunning();
+    ui.stopProgram.disabled = !m || !master.isProgramRunning();
 
     // Sled block
-    setStatus(ui.sledStatus, s ? `Forbundet: ${sled.device.name}` : "Ikke forbundet", s ? "ok" : "");
+    setStatus(ui.sledStatus, hubStatusText(sled), hubStatusKind(sled));
     ui.sledConnect.disabled = s;
     ui.sledDisconnect.disabled = !s;
-    ui.sledStart.disabled = !s;
-    ui.sledStop.disabled = !s;
+    ui.sledStart.disabled = !s || sled.isProgramRunning();
+    ui.sledStop.disabled = !s || !sled.isProgramRunning();
 
     // Score / pull / sled actions go through master
     ui.sendScore.disabled = !m;

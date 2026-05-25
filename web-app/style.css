@@ -245,6 +245,10 @@ input[type="number"] {
     color: var(--ok);
 }
 
+.status[data-kind="running"] {
+    color: #fde68a;
+}
+
 .status[data-kind="error"] {
     color: var(--error);
 }
