@@ -392,35 +392,41 @@ class HubConnection {
 
             // pybricks-code (the official IDE) writes to the command
             // characteristic using writeValueWithoutResponse. We do the same
-            // via _writeCommand, which probes once on the first call and
-            // caches whether the fast path works on this hub.
-
-            // 1. WRITE_USER_PROGRAM_META with total size. Retry once on
-            //    failure — the very first write right after STOP sometimes
-            //    fails while the firmware is still cleaning up.
-            {
+            // The official Pybricks Code download sequence is:
+            //   1) META(size=0)   — invalidate any existing user program
+            //   2) WRITE_USER_RAM chunks
+            //   3) META(size=N)   — commit / validate the just-written
+            //                        program; without this, the firmware
+            //                        leaves the program in an incomplete
+            //                        state and silently ignores the
+            //                        following START_USER_PROGRAM. This is
+            //                        exactly what we were seeing on
+            //                        Display 2 — same code on Display 3
+            //                        worked only because that hub happened
+            //                        to be more lenient about an old, still
+            //                        valid program in flash.
+            //   4) START_USER_PROGRAM
+            const writeMeta = async (size) => {
                 const buf = new Uint8Array(5);
                 buf[0] = CMD_WRITE_USER_PROGRAM_META;
-                new DataView(buf.buffer).setUint32(1, data.length, true);
+                new DataView(buf.buffer).setUint32(1, size, true);
                 try {
                     await this._writeCommand(buf);
                 } catch (e) {
-                    log(`${this.label}: META retry efter ${e && e.message ? e.message : e}`);
+                    log(`${this.label}: META(size=${size}) retry efter ${e && e.message ? e.message : e}`);
                     await new Promise((r) => setTimeout(r, 800));
                     await this._writeCommand(buf);
                 }
-            }
+            };
+
+            // 1. Invalidate any existing program first.
+            await writeMeta(0);
 
             // 2. WRITE_USER_RAM in chunks. We use writeValueWithResponse
             //    here (instead of the no-response fast path that META has
             //    to use to avoid the flash-erase ACK problem) because RAM
             //    writes do not trigger slow firmware work — they just copy
             //    into a buffer — and a guaranteed-delivery ACK is essential.
-            //    A silently dropped chunk leaves the hub waiting for more
-            //    bytes than we ever send; META declared the total length,
-            //    so the firmware never transitions to "program ready" and
-            //    START_USER_PROGRAM is then silently ignored. We have seen
-            //    exactly this symptom on Display 2.
             for (let off = 0; off < data.length; off += chunkSize) {
                 const end = Math.min(off + chunkSize, data.length);
                 const slice = data.subarray(off, end);
@@ -444,17 +450,18 @@ class HubConnection {
                 this.onStateChange();
             }
 
+            // 3. Commit META — tells the firmware the upload is complete
+            //    and validates the program for execution.
+            await writeMeta(data.length);
+
             log(`${this.label}: program flashet (${data.length} bytes)`);
             this.flashSuccessUntil = Date.now() + 4000;
 
-            // Wait for the firmware to commit the freshly written user-RAM
-            // bundle to flash. The hub does not send an explicit "program
-            // ready" notification, and on slower hubs (we have seen this on
-            // Display 2) the commit takes noticeably longer than on others.
-            // Sending START too early is silently ignored — the LED keeps
-            // idling. 2.5 s is comfortably above the worst case we have
-            // measured.
-            await new Promise((r) => setTimeout(r, 2500));
+            // Brief settle after the commit META before we start. Pybricks
+            // Code sends START immediately after this META, but a short
+            // pause makes the LED transition visibly cleaner and gives the
+            // firmware a moment for the final integrity check.
+            await new Promise((r) => setTimeout(r, 400));
 
             // Auto-start the freshly flashed program so we don't end up
             // running a stale program still sitting in flash from a previous
