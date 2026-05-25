@@ -303,10 +303,12 @@ class HubConnection {
         log(`${this.label}: hentet ${data.length} bytes, maxWriteSize=${this.maxWriteSize}`);
 
         // Stop any running program first (best-effort) and give it a moment
-        // to actually halt before we start writing the new bundle.
+        // to actually halt before we start writing the new bundle. Pybricks
+        // firmware needs ~half a second to fully tear down a running program
+        // — sending META too soon comes back as "GATT Error Unknown".
         try {
             await this.stopProgram();
-            await new Promise((r) => setTimeout(r, 250));
+            await new Promise((r) => setTimeout(r, 600));
         } catch (_) { /* ignore */ }
 
         this.flashing = true;
@@ -317,16 +319,31 @@ class HubConnection {
         try {
             // Each WRITE_USER_RAM frame is: 1 byte cmd + 4 byte offset + payload.
             const overhead = 1 + 4;
-            const chunkSize = Math.max(16, this.maxWriteSize - overhead);
+            // Cap chunk size at 100 bytes regardless of what the capability
+            // characteristic claims. Pybricks hubs advertise 512 but the
+            // *actual* negotiated ATT MTU on Android/iOS is usually 185-247,
+            // and writes bigger than that come back as "GATT Error Unknown".
+            // 100 bytes matches what pybricksdev uses and gives plenty of
+            // headroom on every platform we have seen.
+            const safeMax = Math.min(this.maxWriteSize, 100);
+            const chunkSize = Math.max(16, safeMax - overhead);
             const totalChunks = Math.ceil(data.length / chunkSize);
             log(`${this.label}: flasher ${data.length} bytes i ${totalChunks} chunks à ${chunkSize}`);
 
-            // 1. WRITE_USER_PROGRAM_META with total size.
+            // 1. WRITE_USER_PROGRAM_META with total size. Retry once on
+            //    failure — the very first write right after STOP sometimes
+            //    fails while the firmware is still cleaning up.
             {
                 const buf = new Uint8Array(5);
                 buf[0] = CMD_WRITE_USER_PROGRAM_META;
                 new DataView(buf.buffer).setUint32(1, data.length, true);
-                await this.commandChar.writeValueWithResponse(buf);
+                try {
+                    await this.commandChar.writeValueWithResponse(buf);
+                } catch (e) {
+                    log(`${this.label}: META retry efter ${e && e.message ? e.message : e}`);
+                    await new Promise((r) => setTimeout(r, 500));
+                    await this.commandChar.writeValueWithResponse(buf);
+                }
             }
 
             // 2. WRITE_USER_RAM in chunks.
