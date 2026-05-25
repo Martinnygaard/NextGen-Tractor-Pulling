@@ -21,9 +21,9 @@
     },
     "display2": {
       "file": "programs/display2.mpy",
-      "size": 58,
+      "size": 5468,
       "version": "801423c1",
-      "source": "MINIMAL TEST: print only"
+      "source": "hubs/display_2.py"
     },
     "display3": {
       "file": "programs/display3.mpy",
