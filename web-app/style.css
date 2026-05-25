@@ -284,6 +284,16 @@ code {
     white-space: pre-wrap;
 }
 
+.version-badge {
+    margin-left: 0.5rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: #1f2937;
+    color: #94a3b8;
+    font-size: 0.75rem;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
 .distance {
     font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
     font-size: 3.4rem;

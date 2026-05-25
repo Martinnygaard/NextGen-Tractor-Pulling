@@ -338,20 +338,24 @@ class HubConnection {
             const totalChunks = Math.ceil(data.length / chunkSize);
             log(`${this.label}: flasher ${data.length} bytes i ${totalChunks} chunks à ${chunkSize}`);
 
-            // Some hubs accept writes without response, others insist on
-            // response. We probe with-response first (matches what works on
-            // Display 1) and fall back to no-response on GATT errors.
+            // pybricksdev writes to the command characteristic *without*
+            // response (response=False). Some hubs we have seen will accept
+            // writes-with-response but Display 2 reliably fails META with
+            // "GATT Error Unknown" when we ask for a response. Use the
+            // no-response path everywhere; fall back to with-response only
+            // if the characteristic does not advertise WriteWithoutResponse.
             const cc = this.commandChar;
+            const wantsNoResp = cc.properties && cc.properties.writeWithoutResponse;
             const writeChar = async (buf) => {
-                try {
-                    await cc.writeValueWithResponse(buf);
-                } catch (e) {
-                    if (cc.properties && cc.properties.writeWithoutResponse) {
+                if (wantsNoResp) {
+                    try {
                         await cc.writeValueWithoutResponse(buf);
-                    } else {
-                        throw e;
+                        return;
+                    } catch (e) {
+                        // fall through to with-response
                     }
                 }
+                await cc.writeValueWithResponse(buf);
             };
 
             // 1. WRITE_USER_PROGRAM_META with total size. Retry once on
