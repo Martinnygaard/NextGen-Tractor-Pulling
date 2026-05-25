@@ -1,0 +1,35 @@
+{
+  "version": "801423c1",
+  "programs": {
+    "master": {
+      "file": "programs/master.mpy",
+      "size": 3071,
+      "version": "801423c1",
+      "source": "hubs/master_broadcaster.py"
+    },
+    "sled": {
+      "file": "programs/sled.mpy",
+      "size": 9464,
+      "version": "801423c1",
+      "source": "hubs/sled.py"
+    },
+    "display1": {
+      "file": "programs/display1.mpy",
+      "size": 5468,
+      "version": "801423c1",
+      "source": "hubs/display_1.py"
+    },
+    "display2": {
+      "file": "programs/display2.mpy",
+      "size": 5468,
+      "version": "801423c1",
+      "source": "hubs/display_2.py"
+    },
+    "display3": {
+      "file": "programs/display3.mpy",
+      "size": 5468,
+      "version": "801423c1",
+      "source": "hubs/display_3.py"
+    }
+  }
+}

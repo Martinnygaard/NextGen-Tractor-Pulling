@@ -392,41 +392,31 @@ class HubConnection {
 
             // pybricks-code (the official IDE) writes to the command
             // characteristic using writeValueWithoutResponse. We do the same
-            // The official Pybricks Code download sequence is:
-            //   1) META(size=0)   — invalidate any existing user program
-            //   2) WRITE_USER_RAM chunks
-            //   3) META(size=N)   — commit / validate the just-written
-            //                        program; without this, the firmware
-            //                        leaves the program in an incomplete
-            //                        state and silently ignores the
-            //                        following START_USER_PROGRAM. This is
-            //                        exactly what we were seeing on
-            //                        Display 2 — same code on Display 3
-            //                        worked only because that hub happened
-            //                        to be more lenient about an old, still
-            //                        valid program in flash.
-            //   4) START_USER_PROGRAM
-            const writeMeta = async (size) => {
+            // Upload sequence. Our hubs report Pybricks Profile v1.4 (the
+            // capability char is only 10 bytes — v1.5+ would be 11 with a
+            // numSlots byte). On v1.4 firmware a single META(size) acts as
+            // the commit; the META(0) → RAM → META(size) double-META used
+            // by pybricks-code on v1.5+ firmware leaves both displays in a
+            // state where START is silently ignored. So: META(size) once,
+            // then RAM chunks, then START.
+            {
                 const buf = new Uint8Array(5);
                 buf[0] = CMD_WRITE_USER_PROGRAM_META;
-                new DataView(buf.buffer).setUint32(1, size, true);
+                new DataView(buf.buffer).setUint32(1, data.length, true);
                 try {
                     await this._writeCommand(buf);
                 } catch (e) {
-                    log(`${this.label}: META(size=${size}) retry efter ${e && e.message ? e.message : e}`);
+                    log(`${this.label}: META retry efter ${e && e.message ? e.message : e}`);
                     await new Promise((r) => setTimeout(r, 800));
                     await this._writeCommand(buf);
                 }
-            };
+            }
 
-            // 1. Invalidate any existing program first.
-            await writeMeta(0);
-
-            // 2. WRITE_USER_RAM in chunks. We use writeValueWithResponse
-            //    here (instead of the no-response fast path that META has
-            //    to use to avoid the flash-erase ACK problem) because RAM
-            //    writes do not trigger slow firmware work — they just copy
-            //    into a buffer — and a guaranteed-delivery ACK is essential.
+            // WRITE_USER_RAM in chunks. We use writeValueWithResponse
+            // here (instead of the no-response fast path that META has
+            // to use to avoid the flash-erase ACK problem) because RAM
+            // writes do not trigger slow firmware work — they just copy
+            // into a buffer — and a guaranteed-delivery ACK is essential.
             for (let off = 0; off < data.length; off += chunkSize) {
                 const end = Math.min(off + chunkSize, data.length);
                 const slice = data.subarray(off, end);
@@ -450,18 +440,13 @@ class HubConnection {
                 this.onStateChange();
             }
 
-            // 3. Commit META — tells the firmware the upload is complete
-            //    and validates the program for execution.
-            await writeMeta(data.length);
-
             log(`${this.label}: program flashet (${data.length} bytes)`);
             this.flashSuccessUntil = Date.now() + 4000;
 
-            // Brief settle after the commit META before we start. Pybricks
-            // Code sends START immediately after this META, but a short
-            // pause makes the LED transition visibly cleaner and gives the
-            // firmware a moment for the final integrity check.
-            await new Promise((r) => setTimeout(r, 400));
+            // Wait for the firmware to commit the program to flash before
+            // starting. 1.5 s is comfortably above the worst case we have
+            // measured on a Prime Hub.
+            await new Promise((r) => setTimeout(r, 1500));
 
             // Auto-start the freshly flashed program so we don't end up
             // running a stale program still sitting in flash from a previous
@@ -478,14 +463,29 @@ class HubConnection {
             };
 
             try {
+                // Attempt 1: standard v1.4+ START with slot=0.
                 await this.startProgram();
                 let running = await waitForRunning(2500);
+
                 if (!running) {
-                    log(`${this.label}: START_USER_PROGRAM gav ingen status — prøver igen`);
+                    // Attempt 2: legacy 1-byte START (v1.2-v1.3 firmware
+                    // accepts it; some v1.4 firmware in slot-less mode
+                    // also responds to this rather than [0x01, slot]).
+                    log(`${this.label}: START gav ingen status — prøver legacy START [0x01]`);
+                    await new Promise((r) => setTimeout(r, 800));
+                    await this._writeCommand(new Uint8Array([CMD_START_USER_PROGRAM]));
+                    running = await waitForRunning(2500);
+                }
+
+                if (!running) {
+                    // Attempt 3: standard START with slot=0 again, after
+                    // a longer flash-commit settle.
+                    log(`${this.label}: legacy START hjalp ikke — prøver standard START igen`);
                     await new Promise((r) => setTimeout(r, 1500));
                     await this.startProgram();
                     running = await waitForRunning(2500);
                 }
+
                 if (running) {
                     log(`${this.label}: program startet automatisk`);
                 } else {
