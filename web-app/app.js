@@ -398,17 +398,42 @@ class HubConnection {
             log(`${this.label}: program flashet (${data.length} bytes)`);
             this.flashSuccessUntil = Date.now() + 4000;
 
-            // Give the hub a moment to commit the bundle before we start it.
-            await new Promise((r) => setTimeout(r, 250));
+            // Wait for the firmware to commit the freshly written user-RAM
+            // bundle to flash. The hub does not send an explicit "program
+            // ready" notification, but in practice ~1 s is enough for the
+            // largest bundles we ship. Sending START too early is silently
+            // ignored — the LED keeps idling.
+            await new Promise((r) => setTimeout(r, 1000));
 
-            // Auto-start the freshly flashed program so we don't end up running
-            // a stale program still sitting in flash from a previous Pybricks
-            // Code upload. Without this we have seen displays 2/3 "stop after
-            // ~1 s" because the OLD program kept running while the new bundle
-            // sat unused in user RAM.
+            // Auto-start the freshly flashed program so we don't end up
+            // running a stale program still sitting in flash from a previous
+            // Pybricks Code upload. Verify success by watching the
+            // USER_PROGRAM_RUNNING status flag; retry once if the firmware
+            // didn't react (e.g. because flash commit was still finishing).
+            const waitForRunning = async (timeoutMs) => {
+                const deadline = Date.now() + timeoutMs;
+                while (Date.now() < deadline) {
+                    if (this.isProgramRunning()) return true;
+                    await new Promise((r) => setTimeout(r, 100));
+                }
+                return false;
+            };
+
             try {
                 await this.startProgram();
-                log(`${this.label}: program startet automatisk`);
+                let running = await waitForRunning(2500);
+                if (!running) {
+                    log(`${this.label}: START_USER_PROGRAM gav ingen status — prøver igen`);
+                    await new Promise((r) => setTimeout(r, 1500));
+                    await this.startProgram();
+                    running = await waitForRunning(2500);
+                }
+                if (running) {
+                    log(`${this.label}: program startet automatisk`);
+                } else {
+                    this.flashError = "Programmet startede ikke — tryk på hub-knappen eller prøv igen";
+                    log(`${this.label}: ${this.flashError}`);
+                }
             } catch (e) {
                 this.flashError = `Auto-start fejlede: ${e && e.message ? e.message : e}`;
                 log(`${this.label}: ${this.flashError}`);
