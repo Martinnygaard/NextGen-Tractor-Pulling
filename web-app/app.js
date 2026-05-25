@@ -205,6 +205,32 @@ class HubConnection {
                     log(`${this.label}: max BLE write = ${maxWrite} bytes`);
                 }
             }
+            // Layout per Pybricks Profile: u16 maxWriteSize, u32 flags,
+            // u32 maxUserProgSize, optional u8 numOfSlots (v1.5+).
+            // Log the raw bytes + decoded flags so we can compare hubs.
+            const hex = [];
+            for (let i = 0; i < caps.byteLength; i++) {
+                hex.push(caps.getUint8(i).toString(16).padStart(2, "0"));
+            }
+            let flagsStr = "";
+            if (caps.byteLength >= 6) {
+                const f = caps.getUint32(2, true);
+                const names = [];
+                if (f & 0x01) names.push("HasRepl");
+                if (f & 0x02) names.push("MultiMpy6");
+                if (f & 0x04) names.push("MultiMpy6Native6.1");
+                if (f & 0x08) names.push("HasPortView");
+                if (f & 0x10) names.push("HasIMUCalibration");
+                flagsStr = ` flags=0x${f.toString(16)} [${names.join(",")}]`;
+                if (caps.byteLength >= 10) {
+                    const maxProg = caps.getUint32(6, true);
+                    flagsStr += ` maxProgSize=${maxProg}`;
+                }
+                if (caps.byteLength >= 11) {
+                    flagsStr += ` slots=${caps.getUint8(10)}`;
+                }
+            }
+            log(`${this.label}: caps=${hex.join(" ")}${flagsStr}`);
         } catch (e) {
             // Older firmware may not expose the capability characteristic.
         }
@@ -240,7 +266,9 @@ class HubConnection {
                 this.statusFlags = flags >>> 0;
                 this.hasStatus = true;
                 if (((prev ^ flags) & STATUS_USER_PROGRAM_RUNNING) !== 0) {
-                    log(`${this.label}: program ${this.isProgramRunning() ? "kører" : "stoppet"}`);
+                    const progId = data.byteLength > 5 ? data[5] : 0;
+                    const slot = data.byteLength > 6 ? data[6] : 0;
+                    log(`${this.label}: program ${this.isProgramRunning() ? "kører" : "stoppet"} (flags=0x${flags.toString(16)} progId=${progId} slot=${slot})`);
                 }
                 this.onStateChange();
             }
