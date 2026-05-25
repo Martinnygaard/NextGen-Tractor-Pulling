@@ -104,29 +104,6 @@
 
                 <div class="hub-block">
                     <div class="hub-block-head">
-                        <span class="hub-label">Pull Control</span>
-                    </div>
-                    <div class="row">
-                        <button class="btn btn-primary sled-action" data-action="start_pull" disabled>Start
-                            Pull</button>
-                        <button class="btn btn-warning sled-action" data-action="stop_pull" disabled>Stop Pull</button>
-                        <button class="btn sled-action" data-action="reset_distance" disabled>Reset</button>
-                    </div>
-                </div>
-
-                <div class="hub-block">
-                    <div class="hub-block-head">
-                        <span class="hub-label">Score</span>
-                    </div>
-                    <div class="row">
-                        <input id="score" type="number" min="0" max="999" value="0" />
-                        <button id="btn-send-score" class="btn btn-primary" disabled>Set score</button>
-                        <button id="btn-full-pull" class="btn btn-warning" disabled>FULL PULL</button>
-                    </div>
-                </div>
-
-                <div class="hub-block">
-                    <div class="hub-block-head">
                         <span class="hub-label">Slæde</span>
                     </div>
                     <div class="row">
@@ -160,6 +137,21 @@
             <div class="sub">
                 Sidste ACK: <span id="last-ack">-</span>
                 · Sidste sendt seq: <span id="last-seq">-</span>
+            </div>
+        </section>
+
+        <!-- Pull + Score (forside) -->
+        <section class="card">
+            <h2>Pull</h2>
+            <div class="row pull-row">
+                <button class="btn btn-primary sled-action" data-action="start_pull" disabled>Start</button>
+                <button class="btn btn-warning sled-action" data-action="stop_pull" disabled>Stop</button>
+                <button class="btn sled-action" data-action="reset_distance" disabled>Reset</button>
+            </div>
+            <div class="row score-row">
+                <input id="score" type="number" min="0" max="999" value="0" />
+                <button id="btn-send-score" class="btn btn-primary" disabled>Set score</button>
+                <button id="btn-full-pull" class="btn btn-warning" disabled>FULL PULL</button>
             </div>
         </section>
 

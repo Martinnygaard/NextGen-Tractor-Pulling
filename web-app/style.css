@@ -340,3 +340,32 @@ code {
 .config-row input[type="range"] {
     width: 100%;
 }
+
+.pull-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.pull-row .btn {
+    flex: 1;
+    min-height: 56px;
+    font-size: 1.05rem;
+}
+
+.score-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.score-row input[type="number"] {
+    flex: 1;
+    min-width: 120px;
+    font-size: 1.15rem;
+}
+
+.score-row .btn {
+    min-height: 48px;
+}
