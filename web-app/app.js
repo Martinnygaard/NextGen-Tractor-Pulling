@@ -256,9 +256,9 @@ const master = new HubConnection("master", "Puller Master", (line) => {
 const sled = new HubConnection("sled", "Puller Sled", null);
 
 const displays = [
-    new HubConnection("display1", "Puller Display 1", null),
-    new HubConnection("display2", "Puller Display 2", null),
-    new HubConnection("display3", "Puller Display 3", null),
+    new HubConnection("display1", "Puller Score 1", null),
+    new HubConnection("display2", "Puller Score 2", null),
+    new HubConnection("display3", "Puller Score 3", null),
 ];
 const [display1, display2, display3] = displays;
 
