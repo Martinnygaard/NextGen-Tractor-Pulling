@@ -23,11 +23,19 @@
                 <button id="btn-connect" class="btn btn-primary">Forbind til Puller Master</button>
                 <button id="btn-disconnect" class="btn" disabled>Afbryd</button>
             </div>
+            <div class="row">
+                <button id="btn-start-program" class="btn" disabled>Start program</button>
+                <button id="btn-stop-program" class="btn" disabled>Stop program</button>
+            </div>
             <p>Status: <span id="status" class="status">Ikke forbundet</span></p>
             <p class="hint">
                 Kræver Chrome eller Edge på Android. Siden skal være serveret over HTTPS
-                (eller localhost). Master-hubben skal allerede have <code>master_broadcaster.py</code>
-                kørende — denne PoC tilslutter sig stdin på den allerede kørende program.
+                (eller localhost). Rigtig rækkefølge:
+                <strong>1)</strong> boot hubben (lad være med at trykke knappen),
+                <strong>2)</strong> tryk Forbind,
+                <strong>3)</strong> tryk Start program.
+                Når master broadcaster, kan ingen nye centrals forbinde — derfor skal forbindelsen
+                etableres før programmet starter.
             </p>
         </section>
 

@@ -15,6 +15,8 @@ const EVT_WRITE_STDOUT = 0x01;
 const ui = {
     connect: document.getElementById("btn-connect"),
     disconnect: document.getElementById("btn-disconnect"),
+    startProgram: document.getElementById("btn-start-program"),
+    stopProgram: document.getElementById("btn-stop-program"),
     sendScore: document.getElementById("btn-send-score"),
     fullPull: document.getElementById("btn-full-pull"),
     score: document.getElementById("score"),
@@ -41,6 +43,8 @@ function log(line) {
 function setConnectedUi(connected) {
     ui.connect.disabled = connected;
     ui.disconnect.disabled = !connected;
+    ui.startProgram.disabled = !connected;
+    ui.stopProgram.disabled = !connected;
     ui.sendScore.disabled = !connected;
     ui.fullPull.disabled = !connected;
 }
@@ -141,8 +145,31 @@ async function sendScore(value) {
     }
 }
 
+async function startProgram() {
+    if (!commandChar) return;
+    try {
+        // Pybricks CMD_START_USER_PROGRAM, payload = program id (0 = default user program).
+        await commandChar.writeValueWithResponse(new Uint8Array([CMD_START_USER_PROGRAM, 0]));
+        log("tx: START_USER_PROGRAM");
+    } catch (err) {
+        log("FEJL start: " + (err && err.message ? err.message : err));
+    }
+}
+
+async function stopProgram() {
+    if (!commandChar) return;
+    try {
+        await commandChar.writeValueWithResponse(new Uint8Array([CMD_STOP_USER_PROGRAM]));
+        log("tx: STOP_USER_PROGRAM");
+    } catch (err) {
+        log("FEJL stop: " + (err && err.message ? err.message : err));
+    }
+}
+
 ui.connect.addEventListener("click", connect);
 ui.disconnect.addEventListener("click", disconnect);
+ui.startProgram.addEventListener("click", startProgram);
+ui.stopProgram.addEventListener("click", stopProgram);
 ui.sendScore.addEventListener("click", () => sendScore(ui.score.value));
 ui.fullPull.addEventListener("click", () => sendScore(10000));
 
