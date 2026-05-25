@@ -152,6 +152,7 @@ class HubConnection {
         this.flashing = false;
         this.flashProgress = 0;
         this.flashSuccessUntil = 0;  // epoch ms — show "flashet ✓" briefly
+        this.flashError = null;      // last flash error message, sticky for ~6s
         this.actualVersion = null;   // set from "VERSION ..." stdout line
         this.onStateChange = () => { };
     }
@@ -289,13 +290,24 @@ class HubConnection {
 
         // Fetch the .mpy bundle from the deployed PWA (cache-busted).
         const url = mpyUrl + (mpyUrl.includes("?") ? "&" : "?") + "ts=" + Date.now();
+        log(`${this.label}: henter ${url}`);
         const resp = await fetch(url, { cache: "no-store" });
         if (!resp.ok) throw new Error(`Hentning fejlede: HTTP ${resp.status}`);
         const data = new Uint8Array(await resp.arrayBuffer());
         if (data.length === 0) throw new Error("Tomt program");
+        // Sanity-check: an mpy bundle is binary; HTML 404 fallback pages from
+        // GitHub Pages start with "<" so we'd see that here. Bail loudly.
+        if (data[0] === 0x3c /* '<' */) {
+            throw new Error(`Forventede .mpy, fik HTML (${data.length} bytes) — bygges nok stadig`);
+        }
+        log(`${this.label}: hentet ${data.length} bytes, maxWriteSize=${this.maxWriteSize}`);
 
-        // Stop any running program first (best-effort).
-        try { await this.stopProgram(); } catch (_) { /* ignore */ }
+        // Stop any running program first (best-effort) and give it a moment
+        // to actually halt before we start writing the new bundle.
+        try {
+            await this.stopProgram();
+            await new Promise((r) => setTimeout(r, 250));
+        } catch (_) { /* ignore */ }
 
         this.flashing = true;
         this.flashProgress = 0;
@@ -306,6 +318,8 @@ class HubConnection {
             // Each WRITE_USER_RAM frame is: 1 byte cmd + 4 byte offset + payload.
             const overhead = 1 + 4;
             const chunkSize = Math.max(16, this.maxWriteSize - overhead);
+            const totalChunks = Math.ceil(data.length / chunkSize);
+            log(`${this.label}: flasher ${data.length} bytes i ${totalChunks} chunks à ${chunkSize}`);
 
             // 1. WRITE_USER_PROGRAM_META with total size.
             {
@@ -331,6 +345,9 @@ class HubConnection {
             log(`${this.label}: program flashet (${data.length} bytes)`);
             this.flashSuccessUntil = Date.now() + 4000;
 
+            // Give the hub a moment to commit the bundle before we start it.
+            await new Promise((r) => setTimeout(r, 250));
+
             // Auto-start the freshly flashed program so we don't end up running
             // a stale program still sitting in flash from a previous Pybricks
             // Code upload. Without this we have seen displays 2/3 "stop after
@@ -340,14 +357,21 @@ class HubConnection {
                 await this.startProgram();
                 log(`${this.label}: program startet automatisk`);
             } catch (e) {
-                log(`${this.label}: auto-start fejlede: ` + (e && e.message ? e.message : e));
+                this.flashError = `Auto-start fejlede: ${e && e.message ? e.message : e}`;
+                log(`${this.label}: ${this.flashError}`);
             }
+        } catch (e) {
+            this.flashError = `Flash fejlede: ${e && e.message ? e.message : e}`;
+            log(`${this.label}: ${this.flashError}`);
+            this.flashSuccessUntil = 0;
+            throw e;
         } finally {
             this.flashing = false;
             this.flashProgress = 0;
             this.onStateChange();
             // Re-render once the success badge expires.
             setTimeout(() => this.onStateChange(), 4200);
+            setTimeout(() => { this.flashError = null; this.onStateChange(); }, 6000);
         }
     }
 }
@@ -437,6 +461,9 @@ function hubStatusText(hub) {
         const pct = Math.round((hub.flashProgress || 0) * 100);
         return `Opdaterer … ${pct}%`;
     }
+    if (hub.flashError) {
+        return `⚠ ${hub.flashError}`;
+    }
     if (hub.flashSuccessUntil && Date.now() < hub.flashSuccessUntil) {
         return `Program opdateret ✓`;
     }
@@ -456,6 +483,7 @@ function hubStatusText(hub) {
 function hubStatusKind(hub) {
     if (!hub.isConnected()) return "";
     if (hub.flashing) return "running";
+    if (hub.flashError) return "error";
     if (hub.flashSuccessUntil && Date.now() < hub.flashSuccessUntil) return "ok";
     if (!hub.hasStatus) return "ok";
     const expected = expectedVersionFor(hub.label);
