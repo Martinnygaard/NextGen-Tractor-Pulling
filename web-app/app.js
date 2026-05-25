@@ -383,6 +383,12 @@ class HubConnection {
             }
 
             // 2. WRITE_USER_RAM in chunks.
+            //    writeValueWithoutResponse has no flow control, so on
+            //    slower hubs (e.g. Display 2) a burst of 50+ back-to-back
+            //    writes can overrun the controller's RX buffer and silently
+            //    drop bytes. A short yield every few chunks lets the BLE
+            //    stack drain. We use a tiny per-chunk delay rather than a
+            //    larger periodic one to keep the progress bar smooth.
             for (let off = 0; off < data.length; off += chunkSize) {
                 const end = Math.min(off + chunkSize, data.length);
                 const slice = data.subarray(off, end);
@@ -391,6 +397,10 @@ class HubConnection {
                 new DataView(buf.buffer).setUint32(1, off, true);
                 buf.set(slice, overhead);
                 await this._writeCommand(buf);
+                // ~5 ms pacing between chunks. Negligible overall (5 ms *
+                // 58 chunks ≈ 0.3 s) but big enough that the firmware can
+                // process each write before the next one lands.
+                await new Promise((r) => setTimeout(r, 5));
                 this.flashProgress = end / data.length;
                 this.onStateChange();
             }
@@ -400,10 +410,12 @@ class HubConnection {
 
             // Wait for the firmware to commit the freshly written user-RAM
             // bundle to flash. The hub does not send an explicit "program
-            // ready" notification, but in practice ~1 s is enough for the
-            // largest bundles we ship. Sending START too early is silently
-            // ignored — the LED keeps idling.
-            await new Promise((r) => setTimeout(r, 1000));
+            // ready" notification, and on slower hubs (we have seen this on
+            // Display 2) the commit takes noticeably longer than on others.
+            // Sending START too early is silently ignored — the LED keeps
+            // idling. 2.5 s is comfortably above the worst case we have
+            // measured.
+            await new Promise((r) => setTimeout(r, 2500));
 
             // Auto-start the freshly flashed program so we don't end up
             // running a stale program still sitting in flash from a previous
