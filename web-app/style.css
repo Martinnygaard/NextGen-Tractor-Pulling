@@ -43,6 +43,142 @@ header h1 {
     margin: 0;
 }
 
+/* ---------- Hero header ---------- */
+.hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 4px 0 4px;
+}
+
+.hero-title h1 {
+    margin: 2px 0 0;
+    font-size: 1.5rem;
+    letter-spacing: 0.04em;
+}
+
+.eyebrow {
+    margin: 0;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+}
+
+.hero-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.pill {
+    border: 1px solid #334155;
+    background: #0b1220;
+    color: var(--text);
+    padding: 10px 14px;
+    border-radius: 999px;
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    min-height: 44px;
+    letter-spacing: 0.02em;
+}
+
+.pill:hover {
+    background: #111c30;
+}
+
+.pill-hubs[data-kind="ok"] {
+    border-color: #10b981;
+    background: #064e3b;
+    color: #6ee7b7;
+}
+
+.pill-hubs[data-kind="partial"] {
+    border-color: #f59e0b;
+    background: #78350f;
+    color: #fde68a;
+}
+
+.pill-hubs[data-kind="off"] {
+    border-color: #f87171;
+    background: #450a0a;
+    color: #fecaca;
+}
+
+/* ---------- Modal dialog ---------- */
+.modal {
+    border: 1px solid #334155;
+    background: #0b1220;
+    color: var(--text);
+    border-radius: 16px;
+    padding: 0;
+    max-width: 520px;
+    width: calc(100vw - 32px);
+}
+
+.modal::backdrop {
+    background: rgba(2, 6, 23, 0.75);
+}
+
+.modal-form {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px 18px 20px;
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 1.2rem;
+}
+
+.btn-close {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid #334155;
+    padding: 6px 12px;
+    min-height: 0;
+}
+
+.hub-block {
+    border: 1px solid var(--border);
+    background: #111827;
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.hub-block-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.hub-label {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #cbd5e1;
+}
+
+.display-card .distance {
+    margin-bottom: 0;
+}
+
 .card {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -191,10 +327,12 @@ code {
     gap: 6px;
     margin-bottom: 12px;
 }
+
 .config-row label {
     color: var(--muted);
     font-size: 0.95rem;
 }
+
 .config-row input[type="range"] {
     width: 100%;
 }

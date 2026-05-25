@@ -1,17 +1,12 @@
 // Pybricks Profile BLE UUIDs.
-// See: https://github.com/pybricks/technical-info/blob/master/pybricks-ble-profile.md
 const PYBRICKS_SERVICE = "c5f50001-8280-46da-89f4-6d8051e4aeef";
 const PYBRICKS_COMMAND_EVENT_CHAR = "c5f50002-8280-46da-89f4-6d8051e4aeef";
 
-// Command IDs (host -> hub).
 const CMD_STOP_USER_PROGRAM = 0x00;
 const CMD_START_USER_PROGRAM = 0x01;
 const CMD_WRITE_STDIN = 0x06;
-
-// Event IDs (hub -> host).
 const EVT_WRITE_STDOUT = 0x01;
 
-// Sled command actions (must match hubs/sled.py CMD_* constants).
 const SLED_ACTIONS = {
     start_pull: 1,
     stop_pull: 2,
@@ -32,22 +27,28 @@ const ui = {
     lastAck: document.getElementById("last-ack"),
     lastSeq: document.getElementById("last-seq"),
 
-    // Master card
+    hubsBtn: document.getElementById("btn-hubs"),
+    settingsBtn: document.getElementById("btn-settings"),
+    hubDialog: document.getElementById("hub-dialog"),
+    settingsDialog: document.getElementById("settings-dialog"),
+
+    // Master
     connect: document.getElementById("btn-connect"),
     disconnect: document.getElementById("btn-disconnect"),
     startProgram: document.getElementById("btn-start-program"),
     stopProgram: document.getElementById("btn-stop-program"),
     status: document.getElementById("status"),
 
-    // Sled card
+    // Sled
     sledConnect: document.getElementById("btn-sled-connect"),
     sledDisconnect: document.getElementById("btn-sled-disconnect"),
     sledStart: document.getElementById("btn-sled-start"),
     sledStop: document.getElementById("btn-sled-stop"),
     sledPushCfg: document.getElementById("btn-push-config"),
+    sledPushCfg2: document.getElementById("btn-push-config-2"),
     sledStatus: document.getElementById("sled-status"),
 
-    // Score + sled control
+    // Score + sled
     sendScore: document.getElementById("btn-send-score"),
     fullPull: document.getElementById("btn-full-pull"),
     score: document.getElementById("score"),
@@ -60,7 +61,7 @@ const ui = {
     cfgRotVal: document.getElementById("cfg-rot-val"),
 };
 
-let cmdSeq = 0; // local sequence counter for sled commands
+let cmdSeq = 0;
 
 function log(line) {
     const ts = new Date().toLocaleTimeString("da-DK", { hour12: false });
@@ -188,32 +189,41 @@ const master = new HubConnection("master", "Puller Master", (line) => {
 
 const sled = new HubConnection("sled", "Puller Sled", null);
 
-function refreshButtons() {
+function refreshUi() {
     const m = master.isConnected();
     const s = sled.isConnected();
+    const count = (m ? 1 : 0) + (s ? 1 : 0);
 
+    // Top-right pill
+    ui.hubsBtn.textContent = `Hubs ${count}/2`;
+    ui.hubsBtn.dataset.kind = count === 2 ? "ok" : (count === 0 ? "off" : "partial");
+
+    // Master block
     setStatus(ui.status, m ? `Forbundet: ${master.device.name}` : "Ikke forbundet", m ? "ok" : "");
     ui.connect.disabled = m;
     ui.disconnect.disabled = !m;
     ui.startProgram.disabled = !m;
     ui.stopProgram.disabled = !m;
-    ui.sendScore.disabled = !m;
-    ui.fullPull.disabled = !m;
-    ui.sledButtons.forEach((b) => { b.disabled = !m; });
 
+    // Sled block
     setStatus(ui.sledStatus, s ? `Forbundet: ${sled.device.name}` : "Ikke forbundet", s ? "ok" : "");
     ui.sledConnect.disabled = s;
     ui.sledDisconnect.disabled = !s;
     ui.sledStart.disabled = !s;
     ui.sledStop.disabled = !s;
-    // Push config goes via master broadcast → only requires master connection.
+
+    // Score / pull / sled actions go through master
+    ui.sendScore.disabled = !m;
+    ui.fullPull.disabled = !m;
+    ui.sledButtons.forEach((b) => { b.disabled = !m; });
     ui.sledPushCfg.disabled = !m;
+    if (ui.sledPushCfg2) ui.sledPushCfg2.disabled = !m;
 }
 
-master.onStateChange = refreshButtons;
-sled.onStateChange = refreshButtons;
+master.onStateChange = refreshUi;
+sled.onStateChange = refreshUi;
 
-// ---------------- Score + sled commands (via master) ----------------
+// ---------------- Score + sled commands ----------------
 
 async function sendScore(value) {
     const score = Math.max(0, Math.min(999, Number(value) || 0));
@@ -245,7 +255,7 @@ async function sendSledCommand(action, value) {
     }
 }
 
-// ---------------- Config (localStorage + push) ----------------
+// ---------------- Config ----------------
 
 const CFG_KEY = "ngtp-sled-config-v1";
 
@@ -277,13 +287,15 @@ function renderCfgLabels() {
 async function pushConfig() {
     const rampM = Number(ui.cfgRamp.value);
     const rot = Number(ui.cfgRot.value);
-    // Encode as tenths to match sled.py's int(value*10) protocol.
     await sendSledCommand("set_ramp_end_m", Math.round(rampM * 10));
     await sendSledCommand("set_full_rotations", Math.round(rot * 10));
     log(`config pushed: ramp_end_m=${rampM} full_rotations=${rot}`);
 }
 
-// ---------------- Wire up UI ----------------
+// ---------------- Wire up ----------------
+
+ui.hubsBtn.addEventListener("click", () => ui.hubDialog.showModal());
+ui.settingsBtn.addEventListener("click", () => ui.settingsDialog.showModal());
 
 ui.connect.addEventListener("click", async () => {
     try { await master.connect(); }
@@ -315,6 +327,7 @@ ui.sledStop.addEventListener("click", async () => {
     try { await sled.stopProgram(); } catch (e) { log("FEJL sled stop: " + e.message); }
 });
 ui.sledPushCfg.addEventListener("click", () => pushConfig());
+if (ui.sledPushCfg2) ui.sledPushCfg2.addEventListener("click", () => pushConfig());
 
 ui.sendScore.addEventListener("click", () => sendScore(ui.score.value));
 ui.fullPull.addEventListener("click", () => sendScore(10000));
@@ -337,9 +350,8 @@ ui.sledButtons.forEach((btn) => {
 });
 
 loadConfig();
-refreshButtons();
+refreshUi();
 
-// Register service worker for PWA install.
 if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
         navigator.serviceWorker.register("./sw.js").catch(() => { });

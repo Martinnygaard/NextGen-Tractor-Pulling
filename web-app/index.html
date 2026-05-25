@@ -5,68 +5,96 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#0f172a" />
-    <title>NGTP Web Bluetooth PoC</title>
+    <title>NGTP Control</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="stylesheet" href="style.css" />
 </head>
 
 <body>
     <main>
-        <header>
-            <h1>NGTP Web Bluetooth</h1>
-            <p class="sub">Proof of concept — Puller Master direkte fra Chrome</p>
+        <header class="hero">
+            <div class="hero-title">
+                <p class="eyebrow">NextGen Tractor Pull</p>
+                <h1>Control Deck</h1>
+            </div>
+            <div class="hero-actions">
+                <button type="button" id="btn-hubs" class="pill pill-hubs">Hubs 0/2</button>
+                <button type="button" id="btn-settings" class="pill">Settings</button>
+            </div>
         </header>
 
-        <section class="card">
-            <h2>Master-hub</h2>
-            <div class="row">
-                <button id="btn-connect" class="btn btn-primary">Forbind Master</button>
-                <button id="btn-disconnect" class="btn" disabled>Afbryd</button>
-            </div>
-            <div class="row">
-                <button id="btn-start-program" class="btn" disabled>Start program</button>
-                <button id="btn-stop-program" class="btn" disabled>Stop program</button>
-            </div>
-            <p>Status: <span id="status" class="status">Ikke forbundet</span></p>
-            <p class="hint">
-                <strong>Rækkefølge:</strong> boot hub (kort tryk) →
-                Forbind → Start program. Når master broadcaster, kan ingen
-                nye centrals forbinde, så connection skal etableres først.
-            </p>
-        </section>
+        <!-- Hub-forbindelser dialog -->
+        <dialog id="hub-dialog" class="modal">
+            <form method="dialog" class="modal-form">
+                <header class="modal-header">
+                    <h2>Hub-forbindelser</h2>
+                    <button type="submit" class="btn btn-close" value="close">Luk</button>
+                </header>
 
-        <section class="card">
-            <h2>Sled-hub</h2>
-            <div class="row">
-                <button id="btn-sled-connect" class="btn btn-primary">Forbind Sled</button>
-                <button id="btn-sled-disconnect" class="btn" disabled>Afbryd</button>
-            </div>
-            <div class="row">
-                <button id="btn-sled-start" class="btn" disabled>Start program</button>
-                <button id="btn-sled-stop" class="btn" disabled>Stop program</button>
-                <button id="btn-push-config" class="btn" disabled>Push config</button>
-            </div>
-            <p>Status: <span id="sled-status" class="status">Ikke forbundet</span></p>
-            <p class="hint">
-                Sled-programmet skal også startes for at modtage broadcast fra master.
-                "Push config" sender ramp-end &amp; full-rotations til sled via master.
-            </p>
-        </section>
+                <div class="hub-block">
+                    <div class="hub-block-head">
+                        <span class="hub-label">Master</span>
+                        <span id="status" class="status">Ikke forbundet</span>
+                    </div>
+                    <div class="row">
+                        <button id="btn-connect" class="btn btn-primary">Forbind</button>
+                        <button id="btn-disconnect" class="btn" disabled>Afbryd</button>
+                    </div>
+                    <div class="row">
+                        <button id="btn-start-program" class="btn" disabled>Start program</button>
+                        <button id="btn-stop-program" class="btn" disabled>Stop program</button>
+                    </div>
+                </div>
 
-        <section class="card">
-            <h2>Sled config</h2>
-            <div class="config-row">
-                <label for="cfg-ramp">Vægt-rampe slutter ved <span id="cfg-ramp-val">70</span> m</label>
-                <input id="cfg-ramp" type="range" min="5" max="100" step="1" value="70" />
-            </div>
-            <div class="config-row">
-                <label for="cfg-rot">Encoder-omdrejninger pr. 100 m: <span id="cfg-rot-val">43.0</span></label>
-                <input id="cfg-rot" type="range" min="1" max="200" step="0.5" value="43" />
-            </div>
-            <p class="hint">Gemmes lokalt på telefonen. Tryk "Push config" på sled-kortet for at sende til hubben.</p>
-        </section>
+                <div class="hub-block">
+                    <div class="hub-block-head">
+                        <span class="hub-label">Sled</span>
+                        <span id="sled-status" class="status">Ikke forbundet</span>
+                    </div>
+                    <div class="row">
+                        <button id="btn-sled-connect" class="btn btn-primary">Forbind</button>
+                        <button id="btn-sled-disconnect" class="btn" disabled>Afbryd</button>
+                    </div>
+                    <div class="row">
+                        <button id="btn-sled-start" class="btn" disabled>Start program</button>
+                        <button id="btn-sled-stop" class="btn" disabled>Stop program</button>
+                        <button id="btn-push-config" class="btn" disabled>Push config</button>
+                    </div>
+                </div>
 
-        <section class="card">
+                <p class="hint">
+                    <strong>Rækkefølge:</strong> boot hub (kort tryk) → Forbind → Start program.
+                    Når en hub broadcaster, kan ingen nye forbindelser oprettes, så forbind først.
+                </p>
+            </form>
+        </dialog>
+
+        <!-- Settings dialog -->
+        <dialog id="settings-dialog" class="modal">
+            <form method="dialog" class="modal-form">
+                <header class="modal-header">
+                    <h2>Settings</h2>
+                    <button type="submit" class="btn btn-close" value="close">Luk</button>
+                </header>
+
+                <div class="config-row">
+                    <label for="cfg-ramp">Vægt-rampe slutter ved <span id="cfg-ramp-val">70</span> m</label>
+                    <input id="cfg-ramp" type="range" min="5" max="100" step="1" value="70" />
+                </div>
+                <div class="config-row">
+                    <label for="cfg-rot">Encoder-omdrejninger pr. 100 m: <span id="cfg-rot-val">43.0</span></label>
+                    <input id="cfg-rot" type="range" min="1" max="200" step="0.5" value="43" />
+                </div>
+
+                <div class="row">
+                    <button type="button" id="btn-push-config-2" class="btn btn-primary">Push til hub</button>
+                </div>
+                <p class="hint">Gemmes lokalt på telefonen. "Push til hub" kræver at master er forbundet.</p>
+            </form>
+        </dialog>
+
+        <!-- Live afstand -->
+        <section class="card display-card">
             <h2>Live afstand</h2>
             <div id="distance" class="distance">--.- m</div>
             <div class="sub">
@@ -75,25 +103,27 @@
             </div>
         </section>
 
+        <!-- Pull control -->
+        <section class="card">
+            <h2>Pull Control</h2>
+            <div class="row">
+                <button class="btn btn-primary sled-action" data-action="start_pull" disabled>Start Pull</button>
+                <button class="btn btn-warning sled-action" data-action="stop_pull" disabled>Stop Pull</button>
+                <button class="btn sled-action" data-action="reset_distance" disabled>Reset</button>
+            </div>
+        </section>
+
+        <!-- Score -->
         <section class="card">
             <h2>Score</h2>
             <div class="row">
                 <input id="score" type="number" min="0" max="999" value="0" />
-                <button id="btn-send-score" class="btn btn-primary" disabled>Send Score</button>
+                <button id="btn-send-score" class="btn btn-primary" disabled>Set score</button>
                 <button id="btn-full-pull" class="btn btn-warning" disabled>FULL PULL</button>
             </div>
-            <p class="hint">Sender <code>S &lt;score&gt;\n</code> via Pybricks BLE WRITE_STDIN.</p>
         </section>
 
-        <section class="card">
-            <h2>Pull control</h2>
-            <div class="row">
-                <button class="btn btn-primary sled-action" data-action="start_pull" disabled>Start pull</button>
-                <button class="btn btn-warning sled-action" data-action="stop_pull" disabled>Stop pull</button>
-                <button class="btn sled-action" data-action="reset_distance" disabled>Reset distance</button>
-            </div>
-        </section>
-
+        <!-- Slæde -->
         <section class="card">
             <h2>Slæde</h2>
             <div class="row">
@@ -103,20 +133,24 @@
                 <label class="weight-label">Vægt:
                     <input id="weight" type="number" min="0" max="100" step="1" value="0" />%
                 </label>
-                <button class="btn sled-action" data-action="set_weight_percent" data-value-from="#weight" disabled>Sæt vægt</button>
+                <button class="btn sled-action" data-action="set_weight_percent" data-value-from="#weight" disabled>Sæt
+                    vægt</button>
             </div>
             <div class="row">
                 <button class="btn sled-action signal signal-red" data-action="set_signal_red" disabled>Rød</button>
-                <button class="btn sled-action signal signal-green" data-action="set_signal_green" disabled>Grøn</button>
-                <button class="btn sled-action signal signal-blink" data-action="set_signal_green_blink" disabled>Blink</button>
+                <button class="btn sled-action signal signal-green" data-action="set_signal_green"
+                    disabled>Grøn</button>
+                <button class="btn sled-action signal signal-blink" data-action="set_signal_green_blink"
+                    disabled>Blink</button>
                 <button class="btn sled-action signal signal-off" data-action="clear_signal" disabled>Sluk</button>
             </div>
         </section>
 
-        <section class="card">
-            <h2>Hub stdout</h2>
+        <!-- Log (collapsible) -->
+        <details class="card">
+            <summary>Hub stdout</summary>
             <pre id="log" class="log"></pre>
-        </section>
+        </details>
     </main>
     <script src="app.js"></script>
 </body>
