@@ -263,12 +263,19 @@ class HubConnection {
                 // uint32 little-endian status bitfield.
                 const flags = data[1] | (data[2] << 8) | (data[3] << 16) | (data[4] << 24);
                 const prev = this.statusFlags;
+                const wasFirst = !this.hasStatus;
                 this.statusFlags = flags >>> 0;
                 this.hasStatus = true;
-                if (((prev ^ flags) & STATUS_USER_PROGRAM_RUNNING) !== 0) {
-                    const progId = data.byteLength > 5 ? data[5] : 0;
-                    const slot = data.byteLength > 6 ? data[6] : 0;
+                const progId = data.byteLength > 5 ? data[5] : 0;
+                const slot = data.byteLength > 6 ? data[6] : 0;
+                if (wasFirst) {
+                    log(`${this.label}: første status flags=0x${flags.toString(16)} progId=${progId} slot=${slot} bytes=${data.byteLength}`);
+                } else if (((prev ^ flags) & STATUS_USER_PROGRAM_RUNNING) !== 0) {
                     log(`${this.label}: program ${this.isProgramRunning() ? "kører" : "stoppet"} (flags=0x${flags.toString(16)} progId=${progId} slot=${slot})`);
+                } else if (prev !== flags) {
+                    // Non-running-flag transitions are still interesting
+                    // while we debug. Avoid spamming when nothing changes.
+                    log(`${this.label}: status flags=0x${flags.toString(16)} (var 0x${prev.toString(16)}) progId=${progId} slot=${slot}`);
                 }
                 this.onStateChange();
             }
