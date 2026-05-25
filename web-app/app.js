@@ -1,9 +1,12 @@
 // Pybricks Profile BLE UUIDs.
 const PYBRICKS_SERVICE = "c5f50001-8280-46da-89f4-6d8051e4aeef";
 const PYBRICKS_COMMAND_EVENT_CHAR = "c5f50002-8280-46da-89f4-6d8051e4aeef";
+const PYBRICKS_HUB_CAPS_CHAR = "c5f50003-8280-46da-89f4-6d8051e4aeef";
 
 const CMD_STOP_USER_PROGRAM = 0x00;
 const CMD_START_USER_PROGRAM = 0x01;
+const CMD_WRITE_USER_PROGRAM_META = 0x03;
+const CMD_WRITE_USER_RAM = 0x04;
 const CMD_WRITE_STDIN = 0x06;
 const EVT_STATUS_REPORT = 0x00;
 const EVT_WRITE_STDOUT = 0x01;
@@ -73,6 +76,13 @@ const ui = {
     display3Stop: document.getElementById("btn-display3-stop"),
     display3Status: document.getElementById("display3-status"),
 
+    // Flash (program upload) buttons
+    flashMaster: document.getElementById("btn-flash-master"),
+    flashSled: document.getElementById("btn-flash-sled"),
+    flashDisplay1: document.getElementById("btn-flash-display1"),
+    flashDisplay2: document.getElementById("btn-flash-display2"),
+    flashDisplay3: document.getElementById("btn-flash-display3"),
+
     // Score + sled
     sendScore: document.getElementById("btn-send-score"),
     fullPull: document.getElementById("btn-full-pull"),
@@ -133,10 +143,14 @@ class HubConnection {
         this.onLine = onLine;
         this.device = null;
         this.server = null;
+        this.service = null;
         this.commandChar = null;
+        this.maxWriteSize = 20; // ATT default; may be raised after connect
         this.stdoutBuffer = "";
         this.statusFlags = 0;
         this.hasStatus = false;
+        this.flashing = false;
+        this.flashProgress = 0;
         this.onStateChange = () => { };
     }
 
@@ -159,16 +173,36 @@ class HubConnection {
         this.device.addEventListener("gattserverdisconnected", () => {
             log(`${this.label}: afbrudt`);
             this.commandChar = null;
+            this.service = null;
             this.server = null;
             this.statusFlags = 0;
             this.hasStatus = false;
+            this.flashing = false;
             this.onStateChange();
         });
         this.server = await this.device.gatt.connect();
         const service = await this.server.getPrimaryService(PYBRICKS_SERVICE);
+        this.service = service;
         this.commandChar = await service.getCharacteristic(PYBRICKS_COMMAND_EVENT_CHAR);
         await this.commandChar.startNotifications();
         this.commandChar.addEventListener("characteristicvaluechanged", (e) => this._onEvent(e));
+
+        // Discover max characteristic write size from the Hub Capabilities
+        // characteristic so we can use larger chunks while uploading programs.
+        try {
+            const capsChar = await service.getCharacteristic(PYBRICKS_HUB_CAPS_CHAR);
+            const caps = await capsChar.readValue();
+            if (caps.byteLength >= 2) {
+                const maxWrite = caps.getUint16(0, true);
+                if (maxWrite >= 20 && maxWrite <= 512) {
+                    this.maxWriteSize = maxWrite;
+                    log(`${this.label}: max BLE write = ${maxWrite} bytes`);
+                }
+            }
+        } catch (e) {
+            // Older firmware may not expose the capability characteristic.
+        }
+
         log(`${this.label}: forbundet til ${this.device.name}`);
         this.onStateChange();
     }
@@ -236,6 +270,58 @@ class HubConnection {
         await this.commandChar.writeValueWithResponse(new Uint8Array([CMD_STOP_USER_PROGRAM]));
         log(`${this.label}: STOP_USER_PROGRAM`);
     }
+
+    async flashProgram(mpyUrl) {
+        if (!this.commandChar) throw new Error("Ikke forbundet");
+        if (this.flashing) throw new Error("Allerede ved at flashe");
+
+        // Fetch the .mpy bundle from the deployed PWA (cache-busted).
+        const url = mpyUrl + (mpyUrl.includes("?") ? "&" : "?") + "ts=" + Date.now();
+        const resp = await fetch(url, { cache: "no-store" });
+        if (!resp.ok) throw new Error(`Hentning fejlede: HTTP ${resp.status}`);
+        const data = new Uint8Array(await resp.arrayBuffer());
+        if (data.length === 0) throw new Error("Tomt program");
+
+        // Stop any running program first (best-effort).
+        try { await this.stopProgram(); } catch (_) { /* ignore */ }
+
+        this.flashing = true;
+        this.flashProgress = 0;
+        this.onStateChange();
+
+        try {
+            // Each WRITE_USER_RAM frame is: 1 byte cmd + 4 byte offset + payload.
+            const overhead = 1 + 4;
+            const chunkSize = Math.max(16, this.maxWriteSize - overhead);
+
+            // 1. WRITE_USER_PROGRAM_META with total size.
+            {
+                const buf = new Uint8Array(5);
+                buf[0] = CMD_WRITE_USER_PROGRAM_META;
+                new DataView(buf.buffer).setUint32(1, data.length, true);
+                await this.commandChar.writeValueWithResponse(buf);
+            }
+
+            // 2. WRITE_USER_RAM in chunks.
+            for (let off = 0; off < data.length; off += chunkSize) {
+                const end = Math.min(off + chunkSize, data.length);
+                const slice = data.subarray(off, end);
+                const buf = new Uint8Array(overhead + slice.length);
+                buf[0] = CMD_WRITE_USER_RAM;
+                new DataView(buf.buffer).setUint32(1, off, true);
+                buf.set(slice, overhead);
+                await this.commandChar.writeValueWithResponse(buf);
+                this.flashProgress = end / data.length;
+                this.onStateChange();
+            }
+
+            log(`${this.label}: program flashet (${data.length} bytes)`);
+        } finally {
+            this.flashing = false;
+            this.flashProgress = 0;
+            this.onStateChange();
+        }
+    }
 }
 
 // ---------------- Hub instances ----------------
@@ -261,6 +347,29 @@ const displays = [
     new HubConnection("display3", "Puller Score 3", null),
 ];
 const [display1, display2, display3] = displays;
+
+// .mpy program bundles produced by tools/build_programs.py in CI and shipped
+// alongside the PWA. Each entry maps a HubConnection label to the bundle URL.
+const PROGRAM_URLS = {
+    master: "programs/master.mpy",
+    sled: "programs/sled.mpy",
+    display1: "programs/display1.mpy",
+    display2: "programs/display2.mpy",
+    display3: "programs/display3.mpy",
+};
+
+async function flashHub(hub) {
+    const url = PROGRAM_URLS[hub.label];
+    if (!url) {
+        log(`FEJL: ingen .mpy URL for ${hub.label}`);
+        return;
+    }
+    try {
+        await hub.flashProgram(url);
+    } catch (e) {
+        log(`FEJL flash ${hub.label}: ` + (e && e.message ? e.message : String(e)));
+    }
+}
 
 function hubStatusText(hub) {
     if (!hub.isConnected()) return "Ikke forbundet";
@@ -293,15 +402,17 @@ function refreshUi() {
     setStatus(ui.status, hubStatusText(master), hubStatusKind(master));
     ui.connect.disabled = m;
     ui.disconnect.disabled = !m;
-    ui.startProgram.disabled = !m || master.isProgramRunning();
+    ui.startProgram.disabled = !m || master.isProgramRunning() || master.flashing;
     ui.stopProgram.disabled = !m || !master.isProgramRunning();
+    if (ui.flashMaster) ui.flashMaster.disabled = !m || master.flashing;
 
     // Sled block
     setStatus(ui.sledStatus, hubStatusText(sled), hubStatusKind(sled));
     ui.sledConnect.disabled = s;
     ui.sledDisconnect.disabled = !s;
-    ui.sledStart.disabled = !s || sled.isProgramRunning();
+    ui.sledStart.disabled = !s || sled.isProgramRunning() || sled.flashing;
     ui.sledStop.disabled = !s || !sled.isProgramRunning();
+    if (ui.flashSled) ui.flashSled.disabled = !s || sled.flashing;
 
     // Display blocks
     displays.forEach((d, i) => {
@@ -310,8 +421,10 @@ function refreshUi() {
         setStatus(ui[`display${n}Status`], hubStatusText(d), hubStatusKind(d));
         ui[`display${n}Connect`].disabled = connected;
         ui[`display${n}Disconnect`].disabled = !connected;
-        ui[`display${n}Start`].disabled = !connected || d.isProgramRunning();
+        ui[`display${n}Start`].disabled = !connected || d.isProgramRunning() || d.flashing;
         ui[`display${n}Stop`].disabled = !connected || !d.isProgramRunning();
+        const flashBtn = ui[`flashDisplay${n}`];
+        if (flashBtn) flashBtn.disabled = !connected || d.flashing;
     });
 
     // Score / pull / sled actions go through master
@@ -454,6 +567,9 @@ ui.sledStop.addEventListener("click", async () => {
 ui.sledPushCfg.addEventListener("click", () => pushConfig());
 if (ui.sledPushCfg2) ui.sledPushCfg2.addEventListener("click", () => pushConfig());
 
+if (ui.flashMaster) ui.flashMaster.addEventListener("click", () => flashHub(master));
+if (ui.flashSled) ui.flashSled.addEventListener("click", () => flashHub(sled));
+
 displays.forEach((d, i) => {
     const n = i + 1;
     const statusEl = ui[`display${n}Status`];
@@ -471,6 +587,8 @@ displays.forEach((d, i) => {
     ui[`display${n}Stop`].addEventListener("click", async () => {
         try { await d.stopProgram(); } catch (e) { log(`FEJL display${n} stop: ` + e.message); }
     });
+    const flashBtn = ui[`flashDisplay${n}`];
+    if (flashBtn) flashBtn.addEventListener("click", () => flashHub(d));
 });
 
 ui.sendScore.addEventListener("click", () => sendScore(ui.score.value));
