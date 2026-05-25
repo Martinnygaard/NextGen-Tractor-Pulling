@@ -183,6 +183,7 @@ class HubConnection {
             this.flashing = false;
             this.actualVersion = null;
             this._cmdUseNoResp = undefined;
+            this._ramFallbackLogged = false;
             this.onStateChange();
         });
         this.server = await this.device.gatt.connect();
@@ -382,13 +383,16 @@ class HubConnection {
                 }
             }
 
-            // 2. WRITE_USER_RAM in chunks.
-            //    writeValueWithoutResponse has no flow control, so on
-            //    slower hubs (e.g. Display 2) a burst of 50+ back-to-back
-            //    writes can overrun the controller's RX buffer and silently
-            //    drop bytes. A short yield every few chunks lets the BLE
-            //    stack drain. We use a tiny per-chunk delay rather than a
-            //    larger periodic one to keep the progress bar smooth.
+            // 2. WRITE_USER_RAM in chunks. We use writeValueWithResponse
+            //    here (instead of the no-response fast path that META has
+            //    to use to avoid the flash-erase ACK problem) because RAM
+            //    writes do not trigger slow firmware work — they just copy
+            //    into a buffer — and a guaranteed-delivery ACK is essential.
+            //    A silently dropped chunk leaves the hub waiting for more
+            //    bytes than we ever send; META declared the total length,
+            //    so the firmware never transitions to "program ready" and
+            //    START_USER_PROGRAM is then silently ignored. We have seen
+            //    exactly this symptom on Display 2.
             for (let off = 0; off < data.length; off += chunkSize) {
                 const end = Math.min(off + chunkSize, data.length);
                 const slice = data.subarray(off, end);
@@ -396,11 +400,18 @@ class HubConnection {
                 buf[0] = CMD_WRITE_USER_RAM;
                 new DataView(buf.buffer).setUint32(1, off, true);
                 buf.set(slice, overhead);
-                await this._writeCommand(buf);
-                // ~5 ms pacing between chunks. Negligible overall (5 ms *
-                // 58 chunks ≈ 0.3 s) but big enough that the firmware can
-                // process each write before the next one lands.
-                await new Promise((r) => setTimeout(r, 5));
+                try {
+                    await this.commandChar.writeValueWithResponse(buf);
+                } catch (e) {
+                    // Some hubs reject with-response writes for these
+                    // commands too. Fall back to the no-response path and
+                    // accept the (small) risk of a dropped chunk.
+                    if (!this._ramFallbackLogged) {
+                        log(`${this.label}: RAM with-response fejlede (${e && e.message ? e.message : e}), falder tilbage til without-response`);
+                        this._ramFallbackLogged = true;
+                    }
+                    await this._writeCommand(buf);
+                }
                 this.flashProgress = end / data.length;
                 this.onStateChange();
             }
