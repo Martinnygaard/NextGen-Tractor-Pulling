@@ -197,6 +197,11 @@ flag_stop_pull = False
 flag_home_weight = False
 flag_reset_distance = False
 
+# Set True when the sled has been detected stopped at end of a pull.
+# Stays True until the next CMD_RESET_DISTANCE (i.e. sled retracted and
+# ready for a new pull). While True, the displays show "FULL PULL!!!".
+full_pull_signal = False
+
 
 def mode_name(mode):
     if mode == MODE_PULL:
@@ -335,7 +340,7 @@ def flush_debug(mode, distance_m, now_ms):
 
 def broadcast_status(distance_m):
     try:
-        hub.ble.broadcast((int(distance_m), int(last_command_seq)))
+        hub.ble.broadcast((int(distance_m), int(last_command_seq), 1 if full_pull_signal else 0))
     except Exception:
         pass
 
@@ -429,6 +434,7 @@ def poll_commands():
     A command is "new" when cmd_seq is greater than last_command_seq.
     Called from every state machine loop iteration."""
     global last_command_seq, flag_reset_distance, flag_home_weight
+    global full_pull_signal
 
     poll_stop_button()
     poll_local_start_button()
@@ -453,6 +459,11 @@ def poll_commands():
             queue_debug_event("EXEC reset_distance")
         except Exception:
             pass
+        # Clearing distance also clears any pending FULL PULL state so the
+        # displays return to 0 once the sled has been retracted.
+        if full_pull_signal:
+            full_pull_signal = False
+            queue_debug_event("EXEC clear_full_pull")
         flag_reset_distance = False
 
     if flag_home_weight and weight_home_angle != 0:
@@ -660,6 +671,7 @@ def weight_target_for_distance(distance_m):
 
 def run_pull_mode():
     global debug_last_state, flag_stop_pull, flag_start_pull, _pull_active
+    global full_pull_signal
 
     flag_start_pull = False
     flag_stop_pull = False
@@ -752,6 +764,9 @@ def run_pull_mode():
 
         if (now_ms - stop_anchor_ms) >= STOP_DETECT_SECONDS * 1000 and distance_m >= STOP_DETECT_MIN_DISTANCE_M:
             queue_debug_event("STATE PULL_END - sled stopped for %d seconds at %.1f m" % (STOP_DETECT_SECONDS, distance_m))
+            full_pull_signal = True
+            queue_debug_event("EXEC set_full_pull")
+            broadcast_status(distance_m)
             flush_debug(MODE_PULL, distance_m, now_ms)
             break
 

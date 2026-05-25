@@ -64,6 +64,13 @@ FULL_PULL_BASE = 10000
 LOOP_WAIT_MS = 50
 IDLE_LOG_MS = 2000
 
+# How long after the last message from the sled we still consider its
+# distance/full-pull status as live (and drive the displays from it).
+SLED_FRESH_MS = 5000
+
+# How fast the "FULL PULL!!!" banner scrolls across the displays.
+SCROLL_STEP_MS = 120
+
 # Outbound state
 score = 0
 cmd_seq = 0
@@ -73,6 +80,12 @@ cmd_value = 0
 # Inbound state (from sled)
 last_distance_reported = None
 last_ack_reported = None
+last_full_pull_reported = None
+sled_distance = 0
+sled_full_pull = False
+sled_last_seen_ms = -SLED_FRESH_MS
+scroll_offset = 0
+last_scroll_step_ms = 0
 
 hub = HubClass(broadcast_channel=OUT_CHANNEL, observe_channels=[SLED_CHANNEL])
 watch = StopWatch()
@@ -167,7 +180,8 @@ def poll_local_button():
 
 
 def handle_sled_message(msg):
-    global last_distance_reported, last_ack_reported
+    global last_distance_reported, last_ack_reported, last_full_pull_reported
+    global sled_distance, sled_full_pull, sled_last_seen_ms
 
     if msg is None:
         return
@@ -175,18 +189,33 @@ def handle_sled_message(msg):
     if isinstance(msg, tuple) and len(msg) >= 2:
         distance = msg[0]
         ack_seq = msg[1]
+        full_pull_flag = msg[2] if len(msg) >= 3 else 0
     else:
         distance = msg
         ack_seq = None
+        full_pull_flag = 0
 
     try:
         distance = int(distance)
     except Exception:
         distance = None
 
-    if distance is not None and distance != last_distance_reported:
-        print("D", distance)
-        last_distance_reported = distance
+    try:
+        full_pull_flag = int(full_pull_flag)
+    except Exception:
+        full_pull_flag = 0
+
+    if distance is not None:
+        sled_distance = distance
+        sled_last_seen_ms = watch.time()
+        if distance != last_distance_reported:
+            print("D", distance)
+            last_distance_reported = distance
+
+    sled_full_pull = bool(full_pull_flag)
+    if full_pull_flag != last_full_pull_reported:
+        print("FP", 1 if sled_full_pull else 0)
+        last_full_pull_reported = full_pull_flag
 
     if ack_seq is not None:
         try:
@@ -217,22 +246,44 @@ while True:
     incoming = hub.ble.observe(SLED_CHANNEL)
     handle_sled_message(incoming)
 
+    # Compute the score actually shown on the matrix displays.
+    # Priority:
+    #   1. Sled signals FULL PULL -> scrolling banner.
+    #   2. Sled is broadcasting a live distance -> show distance.
+    #   3. Otherwise fall back to the manual score from stdin.
+    now = watch.time()
+    sled_fresh = (now - sled_last_seen_ms) <= SLED_FRESH_MS
+
+    if sled_fresh and sled_full_pull:
+        if now - last_scroll_step_ms >= SCROLL_STEP_MS:
+            scroll_offset += 1
+            last_scroll_step_ms = now
+        out_score = FULL_PULL_BASE + scroll_offset
+    else:
+        scroll_offset = 0
+        if sled_fresh:
+            out_score = sled_distance
+        else:
+            out_score = score
+
     # Visual: white normally, green for full pull.
     try:
-        if score < 0:
+        if out_score < 0:
             hub.light.off()
-        elif score >= FULL_PULL_BASE:
+        elif out_score >= FULL_PULL_BASE:
             hub.light.on(Color.GREEN)
         else:
             hub.light.on(Color.WHITE)
     except Exception:
         pass
 
-    hub.ble.broadcast((score, cmd_seq, cmd_action, cmd_value))
+    hub.ble.broadcast((out_score, cmd_seq, cmd_action, cmd_value))
 
-    now = watch.time()
     if now - last_log_ms >= IDLE_LOG_MS:
-        print("TX score=%d seq=%d act=%d val=%d" % (score, cmd_seq, cmd_action, cmd_value))
+        print("TX score=%d seq=%d act=%d val=%d (sled_d=%d fp=%d fresh=%d)" % (
+            out_score, cmd_seq, cmd_action, cmd_value,
+            sled_distance, 1 if sled_full_pull else 0, 1 if sled_fresh else 0,
+        ))
         last_log_ms = now
 
     wait(LOOP_WAIT_MS)

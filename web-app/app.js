@@ -56,6 +56,23 @@ const ui = {
     sledPushCfg2: document.getElementById("btn-push-config-2"),
     sledStatus: document.getElementById("sled-status"),
 
+    // Displays
+    display1Connect: document.getElementById("btn-display1-connect"),
+    display1Disconnect: document.getElementById("btn-display1-disconnect"),
+    display1Start: document.getElementById("btn-display1-start"),
+    display1Stop: document.getElementById("btn-display1-stop"),
+    display1Status: document.getElementById("display1-status"),
+    display2Connect: document.getElementById("btn-display2-connect"),
+    display2Disconnect: document.getElementById("btn-display2-disconnect"),
+    display2Start: document.getElementById("btn-display2-start"),
+    display2Stop: document.getElementById("btn-display2-stop"),
+    display2Status: document.getElementById("display2-status"),
+    display3Connect: document.getElementById("btn-display3-connect"),
+    display3Disconnect: document.getElementById("btn-display3-disconnect"),
+    display3Start: document.getElementById("btn-display3-start"),
+    display3Stop: document.getElementById("btn-display3-stop"),
+    display3Status: document.getElementById("display3-status"),
+
     // Score + sled
     sendScore: document.getElementById("btn-send-score"),
     fullPull: document.getElementById("btn-full-pull"),
@@ -238,6 +255,13 @@ const master = new HubConnection("master", "Puller Master", (line) => {
 
 const sled = new HubConnection("sled", "Puller Sled", null);
 
+const displays = [
+    new HubConnection("display1", "Puller Display 1", null),
+    new HubConnection("display2", "Puller Display 2", null),
+    new HubConnection("display3", "Puller Display 3", null),
+];
+const [display1, display2, display3] = displays;
+
 function hubStatusText(hub) {
     if (!hub.isConnected()) return "Ikke forbundet";
     const name = hub.device ? hub.device.name : "";
@@ -254,11 +278,16 @@ function hubStatusKind(hub) {
 function refreshUi() {
     const m = master.isConnected();
     const s = sled.isConnected();
-    const count = (m ? 1 : 0) + (s ? 1 : 0);
+    const dConnected = displays.map((d) => d.isConnected());
+    const dCount = dConnected.filter(Boolean).length;
+    const totalConnected = (m ? 1 : 0) + (s ? 1 : 0) + dCount;
+    const totalHubs = 2 + displays.length;
 
     // Top-right pill
-    ui.hubsBtn.textContent = `Hubs ${count}/2`;
-    ui.hubsBtn.dataset.kind = count === 2 ? "ok" : (count === 0 ? "off" : "partial");
+    ui.hubsBtn.textContent = `Hubs ${totalConnected}/${totalHubs}`;
+    ui.hubsBtn.dataset.kind = totalConnected === totalHubs
+        ? "ok"
+        : (totalConnected === 0 ? "off" : "partial");
 
     // Master block
     setStatus(ui.status, hubStatusText(master), hubStatusKind(master));
@@ -274,6 +303,17 @@ function refreshUi() {
     ui.sledStart.disabled = !s || sled.isProgramRunning();
     ui.sledStop.disabled = !s || !sled.isProgramRunning();
 
+    // Display blocks
+    displays.forEach((d, i) => {
+        const n = i + 1;
+        const connected = d.isConnected();
+        setStatus(ui[`display${n}Status`], hubStatusText(d), hubStatusKind(d));
+        ui[`display${n}Connect`].disabled = connected;
+        ui[`display${n}Disconnect`].disabled = !connected;
+        ui[`display${n}Start`].disabled = !connected || d.isProgramRunning();
+        ui[`display${n}Stop`].disabled = !connected || !d.isProgramRunning();
+    });
+
     // Score / pull / sled actions go through master
     ui.sendScore.disabled = !m;
     ui.fullPull.disabled = !m;
@@ -284,6 +324,7 @@ function refreshUi() {
 
 master.onStateChange = refreshUi;
 sled.onStateChange = refreshUi;
+displays.forEach((d) => { d.onStateChange = refreshUi; });
 
 // ---------------- Score + sled commands ----------------
 
@@ -412,6 +453,25 @@ ui.sledStop.addEventListener("click", async () => {
 });
 ui.sledPushCfg.addEventListener("click", () => pushConfig());
 if (ui.sledPushCfg2) ui.sledPushCfg2.addEventListener("click", () => pushConfig());
+
+displays.forEach((d, i) => {
+    const n = i + 1;
+    const statusEl = ui[`display${n}Status`];
+    ui[`display${n}Connect`].addEventListener("click", async () => {
+        try { await d.connect(); }
+        catch (e) {
+            setStatus(statusEl, "Forbindelse fejlede", "error");
+            log(`FEJL display${n}: ` + (e && e.message ? e.message : String(e)));
+        }
+    });
+    ui[`display${n}Disconnect`].addEventListener("click", () => d.disconnect());
+    ui[`display${n}Start`].addEventListener("click", async () => {
+        try { await d.startProgram(); } catch (e) { log(`FEJL display${n} start: ` + e.message); }
+    });
+    ui[`display${n}Stop`].addEventListener("click", async () => {
+        try { await d.stopProgram(); } catch (e) { log(`FEJL display${n} stop: ` + e.message); }
+    });
+});
 
 ui.sendScore.addEventListener("click", () => sendScore(ui.score.value));
 ui.fullPull.addEventListener("click", () => sendScore(10000));
