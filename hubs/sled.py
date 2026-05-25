@@ -64,6 +64,11 @@ GREEN_LIGHT_2_PORT = Port.E
 SCOREBOARD_CHANNEL = 1
 DISTANCE_CHANNEL = 2
 
+# Version string; CI replaces __NGTP_VERSION__ with the git short SHA at
+# build time (see tools/build_programs.py).
+VERSION = "__NGTP_VERSION__"
+print("VERSION sled", VERSION)
+
 # Sled command actions (must match server/bridge_client.py SLED_ACTION_MAP).
 CMD_NOOP = 0
 CMD_START_PULL = 1

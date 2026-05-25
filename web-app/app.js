@@ -151,6 +151,8 @@ class HubConnection {
         this.hasStatus = false;
         this.flashing = false;
         this.flashProgress = 0;
+        this.flashSuccessUntil = 0;  // epoch ms — show "flashet ✓" briefly
+        this.actualVersion = null;   // set from "VERSION ..." stdout line
         this.onStateChange = () => { };
     }
 
@@ -178,6 +180,7 @@ class HubConnection {
             this.statusFlags = 0;
             this.hasStatus = false;
             this.flashing = false;
+            this.actualVersion = null;
             this.onStateChange();
         });
         this.server = await this.device.gatt.connect();
@@ -240,6 +243,15 @@ class HubConnection {
                 const line = this.stdoutBuffer.slice(0, idx).replace(/\r$/, "");
                 this.stdoutBuffer = this.stdoutBuffer.slice(idx + 1);
                 if (!line.length) continue;
+                // Hub programs print "VERSION <kind> <sha>" at boot. Capture it
+                // so the UI can compare against the manifest.
+                if (line.startsWith("VERSION ")) {
+                    const parts = line.split(/\s+/);
+                    if (parts.length >= 3) {
+                        this.actualVersion = parts[parts.length - 1];
+                        this.onStateChange();
+                    }
+                }
                 if (this.onLine) this.onLine(line);
                 log(`${this.label}: ${line}`);
             }
@@ -287,6 +299,7 @@ class HubConnection {
 
         this.flashing = true;
         this.flashProgress = 0;
+        this.actualVersion = null;
         this.onStateChange();
 
         try {
@@ -316,10 +329,13 @@ class HubConnection {
             }
 
             log(`${this.label}: program flashet (${data.length} bytes)`);
+            this.flashSuccessUntil = Date.now() + 4000;
         } finally {
             this.flashing = false;
             this.flashProgress = 0;
             this.onStateChange();
+            // Re-render once the success badge expires.
+            setTimeout(() => this.onStateChange(), 4200);
         }
     }
 }
@@ -358,6 +374,37 @@ const PROGRAM_URLS = {
     display3: "programs/display3.mpy",
 };
 
+// Loaded from web-app/programs/manifest.json on startup. Maps label -> version
+// (the git short SHA the bundle was built with). Used by the UI to verify that
+// a hub is running the same build as the one currently shipped from CI.
+let programManifest = { version: null, programs: {} };
+
+function expectedVersionFor(label) {
+    const entry = programManifest.programs && programManifest.programs[label];
+    if (!entry) return null;
+    // Displays all share scoreboard_display.py, so their VERSION print is the
+    // same for all three. Compare against any display* entry.
+    return entry.version || programManifest.version || null;
+}
+
+async function loadProgramManifest() {
+    try {
+        const resp = await fetch("programs/manifest.json?ts=" + Date.now(), { cache: "no-store" });
+        if (!resp.ok) throw new Error("HTTP " + resp.status);
+        const data = await resp.json();
+        if (data && typeof data === "object") {
+            programManifest = {
+                version: data.version || null,
+                programs: data.programs || {},
+            };
+            log(`Manifest indlæst: v${programManifest.version || "?"}`);
+            refreshUi();
+        }
+    } catch (e) {
+        log("Manifest ikke tilgængeligt: " + (e && e.message ? e.message : e));
+    }
+}
+
 async function flashHub(hub) {
     const url = PROGRAM_URLS[hub.label];
     if (!url) {
@@ -374,13 +421,33 @@ async function flashHub(hub) {
 function hubStatusText(hub) {
     if (!hub.isConnected()) return "Ikke forbundet";
     const name = hub.device ? hub.device.name : "";
+    if (hub.flashing) {
+        const pct = Math.round((hub.flashProgress || 0) * 100);
+        return `Opdaterer … ${pct}%`;
+    }
+    if (hub.flashSuccessUntil && Date.now() < hub.flashSuccessUntil) {
+        return `Program opdateret ✓ — tryk Start program`;
+    }
     if (!hub.hasStatus) return `Forbundet: ${name} · venter på status`;
-    return `Forbundet: ${name} · ${hub.isProgramRunning() ? "Program kører" : "Idle"}`;
+    const base = `Forbundet: ${name} · ${hub.isProgramRunning() ? "Program kører" : "Idle"}`;
+    const expected = expectedVersionFor(hub.label);
+    if (hub.actualVersion) {
+        if (expected && hub.actualVersion !== expected) {
+            return `${base} · v${hub.actualVersion} ⚠ (forventet v${expected})`;
+        }
+        const tick = expected ? " ✓" : "";
+        return `${base} · v${hub.actualVersion}${tick}`;
+    }
+    return base;
 }
 
 function hubStatusKind(hub) {
     if (!hub.isConnected()) return "";
+    if (hub.flashing) return "running";
+    if (hub.flashSuccessUntil && Date.now() < hub.flashSuccessUntil) return "ok";
     if (!hub.hasStatus) return "ok";
+    const expected = expectedVersionFor(hub.label);
+    if (expected && hub.actualVersion && hub.actualVersion !== expected) return "error";
     return hub.isProgramRunning() ? "running" : "ok";
 }
 
@@ -783,6 +850,7 @@ if (btnForceReload) {
 
 loadConfig();
 loadScoreboard();
+loadProgramManifest();
 refreshUi();
 
 if ("serviceWorker" in navigator) {

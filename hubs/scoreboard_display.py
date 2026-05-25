@@ -81,6 +81,11 @@ except ImportError:
 
 CHANNEL = 1
 LAST_MESSAGE_TIMEOUT_MS = 1000
+
+# Version string; CI replaces __NGTP_VERSION__ with the git short SHA at
+# build time (see tools/build_programs.py). Shared by all 3 display hubs.
+VERSION = "__NGTP_VERSION__"
+print("VERSION display", VERSION)
 # When True, run a local test loop and ignore BLE broadcasts. Useful
 # when the master hub or REPL is not available (e.g., during initial
 # hardware bring-up). Set to True on each display hub before upload.

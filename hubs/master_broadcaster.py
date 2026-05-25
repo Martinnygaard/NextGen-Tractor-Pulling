@@ -61,6 +61,12 @@ OUT_CHANNEL = 1
 SLED_CHANNEL = 2
 FULL_PULL_BASE = 10000
 
+# Version string; CI replaces __NGTP_VERSION__ with the git short SHA at
+# build time (see tools/build_programs.py). When uploaded directly from
+# Pybricks Code the literal placeholder is shown, which is fine for dev.
+VERSION = "__NGTP_VERSION__"
+print("VERSION master", VERSION)
+
 LOOP_WAIT_MS = 50
 IDLE_LOG_MS = 2000
 
