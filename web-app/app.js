@@ -546,6 +546,12 @@ class HubConnection {
                     }
                     await this._writeCommand(buf);
                 }
+                // Pace chunks: Android BLE stack can ACK a writeValueWithResponse
+                // before the hub has actually processed it. Without a small
+                // pause, fast successive RAM writes occasionally land out of
+                // order or overwrite the previous one, producing a mpy with
+                // corrupt bytes near chunk boundaries.
+                await new Promise((r) => setTimeout(r, 30));
                 this.flashProgress = end / data.length;
                 this.onStateChange();
             }
