@@ -1,4 +1,4 @@
-﻿# BISECT-TEST 11: 20 prints (between working 99B and failing 577B).
+# BISECT-TEST 11: 20 prints (between working 99B and failing 577B).
 print("L01")
 print("L02")
 print("L03")
