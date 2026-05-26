@@ -488,6 +488,17 @@ class HubConnection {
             };
 
             try {
+                // For display hubs we disconnect *before* sending START
+                // so that PrimeHub(observe_channels=[CHANNEL]) can
+                // reconfigure the BLE radio into observer mode without
+                // an active GATT link to fight. Keeping the central
+                // connected past start makes the program freeze a few
+                // seconds in. Manual hub-button starts work for exactly
+                // the same reason. We can't see status notifications
+                // after we disconnect, so for display hubs we trust the
+                // ACK from the write and skip the running-flag check.
+                const isDisplay = /^display\d+$/.test(this.label);
+
                 // Display 2's BLE stack silently drops
                 // writeValueWithoutResponse for START_USER_PROGRAM (META
                 // and RAM writes go through fine on the same fast path).
@@ -499,50 +510,45 @@ class HubConnection {
                     new Uint8Array([CMD_START_USER_PROGRAM, 0]),
                 );
                 log(`${this.label}: START_USER_PROGRAM (ack)`);
-                let running = await waitForStart(2500);
 
-                if (!running) {
-                    // Fallback: legacy 1-byte START with ACK in case the
-                    // firmware is on an older profile that does not
-                    // accept the slot byte.
-                    log(`${this.label}: START gav ingen status — prøver legacy [0x01] med ACK`);
-                    await new Promise((r) => setTimeout(r, 600));
+                if (isDisplay) {
+                    // Drop the GATT link immediately so the firmware can
+                    // bring the radio into observer mode unimpeded.
                     try {
-                        await this.commandChar.writeValueWithResponse(
-                            new Uint8Array([CMD_START_USER_PROGRAM]),
-                        );
-                        log(`${this.label}: START_USER_PROGRAM legacy (ack)`);
+                        this.device.gatt.disconnect();
+                        log(`${this.label}: afkoblet straks efter START (display kører autonomt)`);
                     } catch (e) {
-                        log(`${this.label}: legacy ACK-START fejlede (${e && e.message ? e.message : e})`);
+                        // gattserverdisconnected handler will tidy up.
                     }
-                    running = await waitForStart(2500);
-                }
-
-                if (running) {
-                    log(`${this.label}: program startet automatisk`);
-                    // Display hubs reconfigure their BLE radio into
-                    // observe mode shortly after start (PrimeHub(
-                    // observe_channels=[CHANNEL])). If the PWA stays
-                    // connected, that reconfiguration races with our
-                    // active GATT link and the program crashes silently
-                    // a few seconds later. Manual hub-button starts work
-                    // because there is no PWA connection to fight. So:
-                    // proactively drop the GATT link now that we know
-                    // the program is up. Sled and master don't switch
-                    // to observe mode, so we leave their connections
-                    // alone.
-                    if (/^display\d+$/.test(this.label)) {
-                        try {
-                            this.device.gatt.disconnect();
-                            log(`${this.label}: afkoblet efter start (display kører autonomt)`);
-                        } catch (e) {
-                            // ignore — gattserverdisconnected listener
-                            // will clean up state anyway.
-                        }
-                    }
+                    // Don't try to verify running state — we have no
+                    // connection. The hub status light will tell the
+                    // user whether it worked.
                 } else {
-                    this.flashError = "Programmet startede ikke — tryk på hub-knappen eller prøv igen";
-                    log(`${this.label}: ${this.flashError}`);
+                    let running = await waitForStart(2500);
+
+                    if (!running) {
+                        // Fallback: legacy 1-byte START with ACK in case
+                        // the firmware is on an older profile that does
+                        // not accept the slot byte.
+                        log(`${this.label}: START gav ingen status — prøver legacy [0x01] med ACK`);
+                        await new Promise((r) => setTimeout(r, 600));
+                        try {
+                            await this.commandChar.writeValueWithResponse(
+                                new Uint8Array([CMD_START_USER_PROGRAM]),
+                            );
+                            log(`${this.label}: START_USER_PROGRAM legacy (ack)`);
+                        } catch (e) {
+                            log(`${this.label}: legacy ACK-START fejlede (${e && e.message ? e.message : e})`);
+                        }
+                        running = await waitForStart(2500);
+                    }
+
+                    if (running) {
+                        log(`${this.label}: program startet automatisk`);
+                    } else {
+                        this.flashError = "Programmet startede ikke — tryk på hub-knappen eller prøv igen";
+                        log(`${this.label}: ${this.flashError}`);
+                    }
                 }
             } catch (e) {
                 this.flashError = `Auto-start fejlede: ${e && e.message ? e.message : e}`;
