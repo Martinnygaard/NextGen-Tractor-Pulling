@@ -1,6 +1,17 @@
-# BISECT-TEST 7: isolate the for-loop with range.
+# BISECT-TEST 8: re-run bisect-4 to check determinism.
 print("A")
-for i in range(3):
+from pybricks.hubs import PrimeHub
+print("B")
+from pybricks.parameters import Color, Port
+print("C")
+from pybricks.tools import wait
+print("D")
+from pybricks.pupdevices import ColorLightMatrix
+print("E")
+hub = PrimeHub()
+print("F")
+for i in range(10):
     print("tick", i)
+    wait(500)
 print("Z")
 
