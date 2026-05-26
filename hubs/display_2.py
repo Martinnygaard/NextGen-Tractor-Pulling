@@ -1,11 +1,14 @@
-# BISECT-14: visuel LED-test med korrekt Color-API
-from pybricks.hubs import PrimeHub
-from pybricks.parameters import Color
-from pybricks.tools import wait
-hub = PrimeHub()
-hub.light.on(Color.BLUE)
-wait(2000)
-hub.light.on(Color.YELLOW)
-wait(2000)
-hub.light.off()
-print("BISECT14_DONE")
+from scoreboard_display import run_display_hub
+
+
+# Display hub 2 controls global matrix columns 3..5.
+HUB_INDEX = 1
+
+# Local matrix layout:
+# [A][C][E]
+# [B][D][F]
+# Compensate for 90 deg CW hardware rotation by rotating matrices 270 deg.
+ROTATIONS = [270, 270, 270, 270, 270, 270]
+
+
+run_display_hub(HUB_INDEX, ROTATIONS)
