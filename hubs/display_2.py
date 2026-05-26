@@ -1,4 +1,4 @@
-# BISECT-TEST 8: re-run bisect-4 to check determinism.
+# BISECT-TEST 9: all imports + hub + Z (no loop).
 print("A")
 from pybricks.hubs import PrimeHub
 print("B")
@@ -10,8 +10,5 @@ from pybricks.pupdevices import ColorLightMatrix
 print("E")
 hub = PrimeHub()
 print("F")
-for i in range(10):
-    print("tick", i)
-    wait(500)
 print("Z")
 

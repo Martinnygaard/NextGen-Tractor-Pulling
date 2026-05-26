@@ -4,7 +4,7 @@
 // so each CI deploy gets a fresh cache namespace and the SW activate step
 // purges the previous one. The fallback "dev" name is used when running
 // locally without the build step.
-const CACHE = "ngtp-0b160be1";
+const CACHE = "ngtp-a2d2ffaa";
 const ASSETS = [
     "./",
     "./index.html",
