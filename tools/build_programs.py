@@ -86,7 +86,7 @@ def stage_hubs_dir(repo_root: Path, dest: Path, version: str) -> None:
 # by the time the entry point's top-level code runs.
 INLINE_CHAINS: dict[str, list[str]] = {
     "display_1.py": ["display_logic.py", "scoreboard_display.py"],
-    "display_2.py": ["display_logic.py", "scoreboard_display.py"],
+    # display_2.py temporarily a hello-world print test; no inlining needed.
     "display_3.py": ["display_logic.py", "scoreboard_display.py"],
 }
 
