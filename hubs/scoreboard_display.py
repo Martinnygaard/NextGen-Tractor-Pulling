@@ -171,14 +171,17 @@ def make_hub_matrices():
 
 
 def run_display_hub(hub_index, rotations):
-    # Diagnostic prints so we can pinpoint where the hub freezes when
-    # started from the PWA. Each print flushes immediately over BLE.
-    print("[hub] alive idx=", hub_index)
-    print("[hub] before PrimeHub(observe_channels)")
-    hub = PrimeHub(observe_channels=[CHANNEL])
-    print("[hub] after PrimeHub(observe_channels)")
-    matrices = make_hub_matrices()
-    print("[hub] after make_hub_matrices, entering main loop")
+    # SMOKE TEST: bypass all hub init and observer setup. Just print at
+    # 1 Hz so we can confirm the build pipeline + BLE stdout actually
+    # work end to end. If we see "smoketest tick N" in the PWA log,
+    # we know the rest of the program (PrimeHub(observe_channels)) is
+    # what crashes the hub.
+    print("smoketest start idx=", hub_index)
+    for i in range(60):
+        print("smoketest tick", i)
+        wait(1000)
+    print("smoketest done")
+    return
     global_x_offset = hub_index * LOCAL_WIDTH
 
     last_message = None
