@@ -482,13 +482,10 @@ class HubConnection {
         try {
             // Each WRITE_USER_RAM frame is: 1 byte cmd + 4 byte offset + payload.
             const overhead = 1 + 4;
-            // Cap chunk size at 100 bytes regardless of what the capability
-            // characteristic claims. Pybricks hubs advertise 512 but the
-            // *actual* negotiated ATT MTU on Android/iOS is usually 185-247,
-            // and writes bigger than that come back as "GATT Error Unknown".
-            // 100 bytes matches what pybricksdev uses and gives plenty of
-            // headroom on every platform we have seen.
-            const safeMax = Math.min(this.maxWriteSize, 100);
+            // DEBUG: bump cap so we use fewer/bigger chunks. If the
+            // corruption is at chunk boundaries, fewer boundaries = fewer
+            // failures. 200 means a 577-byte program fits in 3 chunks.
+            const safeMax = Math.min(this.maxWriteSize, 200);
             const chunkSize = Math.max(16, safeMax - overhead);
             const totalChunks = Math.ceil(data.length / chunkSize);
             log(`${this.label}: flasher ${data.length} bytes i ${totalChunks} chunks à ${chunkSize}`);
