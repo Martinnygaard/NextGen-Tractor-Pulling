@@ -1,11 +1,6 @@
-# BISECT-TEST 6: isolate hub = PrimeHub() instantiation.
+# BISECT-TEST 7: isolate the for-loop with range.
 print("A")
-from pybricks.hubs import PrimeHub
-print("B")
-hub = PrimeHub()
-print("C")
-from pybricks.tools import wait
-print("D")
-wait(200)
-print("E")
+for i in range(3):
+    print("tick", i)
+print("Z")
 
