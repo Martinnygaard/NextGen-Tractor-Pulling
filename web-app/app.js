@@ -520,6 +520,26 @@ class HubConnection {
 
                 if (running) {
                     log(`${this.label}: program startet automatisk`);
+                    // Display hubs reconfigure their BLE radio into
+                    // observe mode shortly after start (PrimeHub(
+                    // observe_channels=[CHANNEL])). If the PWA stays
+                    // connected, that reconfiguration races with our
+                    // active GATT link and the program crashes silently
+                    // a few seconds later. Manual hub-button starts work
+                    // because there is no PWA connection to fight. So:
+                    // proactively drop the GATT link now that we know
+                    // the program is up. Sled and master don't switch
+                    // to observe mode, so we leave their connections
+                    // alone.
+                    if (/^display\d+$/.test(this.label)) {
+                        try {
+                            this.device.gatt.disconnect();
+                            log(`${this.label}: afkoblet efter start (display kører autonomt)`);
+                        } catch (e) {
+                            // ignore — gattserverdisconnected listener
+                            // will clean up state anyway.
+                        }
+                    }
                 } else {
                     this.flashError = "Programmet startede ikke — tryk på hub-knappen eller prøv igen";
                     log(`${this.label}: ${this.flashError}`);
