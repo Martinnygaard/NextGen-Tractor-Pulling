@@ -400,26 +400,33 @@ class HubConnection {
             const totalChunks = Math.ceil(data.length / chunkSize);
             log(`${this.label}: flasher ${data.length} bytes i ${totalChunks} chunks à ${chunkSize}`);
 
-            // pybricks-code (the official IDE) writes to the command
-            // characteristic using writeValueWithoutResponse. We do the same
-            // Upload sequence. Our hubs report Pybricks Profile v1.4 (the
-            // capability char is only 10 bytes — v1.5+ would be 11 with a
-            // numSlots byte). On v1.4 firmware a single META(size) acts as
-            // the commit; the META(0) → RAM → META(size) double-META used
-            // by pybricks-code on v1.5+ firmware leaves both displays in a
-            // state where START is silently ignored. So: META(size) once,
-            // then RAM chunks, then START.
+            // Canonical Pybricks v1.2+ upload procedure (see
+            // pybricks-ble-profile.md):
+            //   1. META(size=0)         → invalidates any persisted slot 0
+            //                              program; firmware erases flash so
+            //                              the new image can be committed.
+            //   2. RAM chunks           → stream the .mpy into user RAM.
+            //   3. META(size=actual)    → commit: firmware persists the RAM
+            //                              buffer to flash slot 0 and marks
+            //                              it as the runnable program.
+            // Skipping step 1 or 3 leaves slot 0 pointing at the previously
+            // flashed program (e.g. the green/red test from Pybricks Code),
+            // which is what the hub center button starts.
             {
                 const buf = new Uint8Array(5);
                 buf[0] = CMD_WRITE_USER_PROGRAM_META;
-                new DataView(buf.buffer).setUint32(1, data.length, true);
+                new DataView(buf.buffer).setUint32(1, 0, true);
                 try {
                     await this._writeCommand(buf);
                 } catch (e) {
-                    log(`${this.label}: META retry efter ${e && e.message ? e.message : e}`);
+                    log(`${this.label}: META(0) retry efter ${e && e.message ? e.message : e}`);
                     await new Promise((r) => setTimeout(r, 800));
                     await this._writeCommand(buf);
                 }
+                // Give the firmware a moment to erase the flash slot before
+                // we start streaming RAM chunks. Skipping this on slower
+                // hubs has caused the first RAM write to ACK but never land.
+                await new Promise((r) => setTimeout(r, 200));
             }
 
             // WRITE_USER_RAM in chunks. We use writeValueWithResponse
@@ -452,6 +459,25 @@ class HubConnection {
 
             log(`${this.label}: program flashet (${data.length} bytes)`);
             this.flashSuccessUntil = Date.now() + 4000;
+
+            // Step 3 of the canonical upload: commit by writing META with
+            // the actual program size. This is what tells the firmware
+            // "the upload is complete, persist this image to slot 0".
+            // Without this step the RAM buffer still holds the new program
+            // (so START runs it once) but flash still holds the previous
+            // program (so the hub center button keeps starting the old one).
+            {
+                const buf = new Uint8Array(5);
+                buf[0] = CMD_WRITE_USER_PROGRAM_META;
+                new DataView(buf.buffer).setUint32(1, data.length, true);
+                try {
+                    await this._writeCommand(buf);
+                } catch (e) {
+                    log(`${this.label}: META(size) commit retry efter ${e && e.message ? e.message : e}`);
+                    await new Promise((r) => setTimeout(r, 800));
+                    await this._writeCommand(buf);
+                }
+            }
 
             // Wait for the firmware to commit the program to flash before
             // starting. 1.5 s is comfortably above the worst case we have
