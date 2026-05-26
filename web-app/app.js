@@ -488,42 +488,48 @@ class HubConnection {
             };
 
             try {
-                // For display hubs we disconnect *before* sending START
-                // so that PrimeHub(observe_channels=[CHANNEL]) can
-                // reconfigure the BLE radio into observer mode without
-                // an active GATT link to fight. Keeping the central
-                // connected past start makes the program freeze a few
-                // seconds in. Manual hub-button starts work for exactly
-                // the same reason. We can't see status notifications
-                // after we disconnect, so for display hubs we trust the
-                // ACK from the write and skip the running-flag check.
+                // Display hubs cannot be auto-started reliably over BLE.
+                // Every variation we have tried (ack-write, no-ack-write,
+                // immediate disconnect, post-start disconnect, 2 s sleep
+                // on the hub before observe_channels) ends in the same
+                // failure: program starts, freezes a couple of seconds
+                // in, never reaches steady state. Manual hub-button
+                // starts of the exact same flashed program always work,
+                // so the program itself is fine — something about the
+                // PWA-initiated start path leaves the BLE radio in a
+                // state the firmware can't reconfigure cleanly. Skip
+                // auto-start entirely for display hubs: disconnect now,
+                // tell the user to press the center button on the hub.
+                // Sled and master keep the auto-start flow because they
+                // never enter observer mode.
                 const isDisplay = /^display\d+$/.test(this.label);
 
-                // Display 2's BLE stack silently drops
-                // writeValueWithoutResponse for START_USER_PROGRAM (META
-                // and RAM writes go through fine on the same fast path).
-                // Using writeValueWithResponse for START makes the host
-                // wait for the firmware ACK before returning, which is
-                // reliable on every hub we have tested. Other commands
-                // stay on the no-response fast path.
-                await this.commandChar.writeValueWithResponse(
-                    new Uint8Array([CMD_START_USER_PROGRAM, 0]),
-                );
-                log(`${this.label}: START_USER_PROGRAM (ack)`);
-
                 if (isDisplay) {
-                    // Drop the GATT link immediately so the firmware can
-                    // bring the radio into observer mode unimpeded.
                     try {
                         this.device.gatt.disconnect();
-                        log(`${this.label}: afkoblet straks efter START (display kører autonomt)`);
                     } catch (e) {
-                        // gattserverdisconnected handler will tidy up.
+                        // gattserverdisconnected handler tidies up.
                     }
-                    // Don't try to verify running state — we have no
-                    // connection. The hub status light will tell the
-                    // user whether it worked.
+                    this.flashError =
+                        "Flash OK — tryk på hub-knappen (midt) for at starte programmet";
+                    log(`${this.label}: ${this.flashError}`);
                 } else {
+                    // Sled / master: keep the connection and verify the
+                    // running flag the same way as before.
+                    //
+                    // Display 2's BLE stack silently drops
+                    // writeValueWithoutResponse for START_USER_PROGRAM
+                    // (META and RAM writes go through fine on the same
+                    // fast path). Using writeValueWithResponse for START
+                    // makes the host wait for the firmware ACK before
+                    // returning, which is reliable on every hub we have
+                    // tested. Other commands stay on the no-response
+                    // fast path.
+                    await this.commandChar.writeValueWithResponse(
+                        new Uint8Array([CMD_START_USER_PROGRAM, 0]),
+                    );
+                    log(`${this.label}: START_USER_PROGRAM (ack)`);
+
                     let running = await waitForStart(2500);
 
                     if (!running) {
