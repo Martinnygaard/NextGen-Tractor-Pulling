@@ -258,6 +258,16 @@ class HubConnection {
         if (!dv || dv.byteLength < 1) return;
         const data = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
         const evtId = data[0];
+        // Diagnostic: log every non-status event so we can see if the hub
+        // sends stdout under a different event id or with unexpected
+        // framing. Status reports are far too noisy to log raw.
+        if (evtId !== EVT_STATUS_REPORT) {
+            const hex = Array.from(data)
+                .slice(0, 32)
+                .map((b) => b.toString(16).padStart(2, "0"))
+                .join(" ");
+            log(`${this.label}: BLE evt id=0x${evtId.toString(16)} len=${data.byteLength} [${hex}${data.byteLength > 32 ? " …" : ""}]`);
+        }
         if (evtId === EVT_STATUS_REPORT) {
             if (data.byteLength >= 5) {
                 // uint32 little-endian status bitfield.
