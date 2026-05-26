@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -126,15 +127,37 @@ async def main() -> int:
     # is what makes the PWA actually pick up new code on installed devices,
     # bypassing the long GitHub Pages HTTP cache for app.js/style.css.
     web_root = repo_root / "web-app"
+    # Patterns we re-stamp on every build. The first run replaces the
+    # __NGTP_VERSION__ placeholder; later runs find the previous SHA stamp
+    # at the same anchor and overwrite it. Without this, index.html and
+    # sw.js would freeze on the first deploy's SHA and GitHub Pages would
+    # keep serving the cached app.js?v=<old-sha>.
+    stamp_patterns = [
+        # ?v=<sha> on app.js / style.css references
+        (re.compile(r"(\?v=)(?:__NGTP_VERSION__|[0-9a-f]{7,40})"), r"\g<1>" + version),
+        # <span id="pwa-version">SHA</span>
+        (
+            re.compile(r'(id="pwa-version">)(?:__NGTP_VERSION__|[0-9a-f]{7,40})(<)'),
+            r"\g<1>" + version + r"\g<2>",
+        ),
+        # SW cache name "ngtp-<sha>"
+        (
+            re.compile(r'("ngtp-)(?:__NGTP_VERSION__|[0-9a-f]{7,40})(")'),
+            r"\g<1>" + version + r"\g<2>",
+        ),
+    ]
     for rel in ("index.html", "sw.js"):
         path = web_root / rel
         if not path.exists():
             continue
         text = path.read_text(encoding="utf-8")
-        if VERSION_PLACEHOLDER in text:
-            path.write_text(
-                text.replace(VERSION_PLACEHOLDER, version), encoding="utf-8"
-            )
+        new_text = text
+        for pat, repl in stamp_patterns:
+            new_text = pat.sub(repl, new_text)
+        # Also handle any straggler placeholder occurrences not covered above.
+        new_text = new_text.replace(VERSION_PLACEHOLDER, version)
+        if new_text != text:
+            path.write_text(new_text, encoding="utf-8")
             print(f"Stamped {rel} with v={version}")
 
     return 1 if failed else 0
