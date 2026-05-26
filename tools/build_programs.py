@@ -138,6 +138,12 @@ def maybe_inline_entry(staged: Path, entry_name: str) -> Path:
         return staged / entry_name
 
     pieces: list[str] = []
+    # Boot marker — printed before ANY import so that if the program runs
+    # at all we will see this over BLE stdout. If the inlined entry
+    # crashes during imports (e.g. a module-level `try_import_hub()` call
+    # in scoreboard_display.py raising ImportError), the traceback might
+    # not be flushed but this print will already have made it out.
+    pieces.append('print("[boot] inlined entry alive")\n')
     for dep in chain:
         dep_text = (staged / dep).read_text(encoding="utf-8")
         pieces.append(f"# --- inlined from {dep} ---\n")
