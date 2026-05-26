@@ -1,34 +1,34 @@
 {
-  "version": "c2407c05",
+  "version": "d11aa0f0",
   "programs": {
     "master": {
       "file": "programs/master.mpy",
       "size": 3071,
-      "version": "c2407c05",
+      "version": "d11aa0f0",
       "source": "hubs/master_broadcaster.py"
     },
     "sled": {
       "file": "programs/sled.mpy",
       "size": 9464,
-      "version": "c2407c05",
+      "version": "d11aa0f0",
       "source": "hubs/sled.py"
     },
     "display1": {
       "file": "programs/display1.mpy",
       "size": 5030,
-      "version": "c2407c05",
+      "version": "d11aa0f0",
       "source": "hubs/display_1.py"
     },
     "display2": {
       "file": "programs/display2.mpy",
-      "size": 213,
-      "version": "c2407c05",
+      "size": 353,
+      "version": "d11aa0f0",
       "source": "hubs/display_2.py"
     },
     "display3": {
       "file": "programs/display3.mpy",
       "size": 5030,
-      "version": "c2407c05",
+      "version": "d11aa0f0",
       "source": "hubs/display_3.py"
     }
   }
