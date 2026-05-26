@@ -171,8 +171,14 @@ def make_hub_matrices():
 
 
 def run_display_hub(hub_index, rotations):
+    # Diagnostic prints so we can pinpoint where the hub freezes when
+    # started from the PWA. Each print flushes immediately over BLE.
+    print("[hub] alive idx=", hub_index)
+    print("[hub] before PrimeHub(observe_channels)")
     hub = PrimeHub(observe_channels=[CHANNEL])
+    print("[hub] after PrimeHub(observe_channels)")
     matrices = make_hub_matrices()
+    print("[hub] after make_hub_matrices, entering main loop")
     global_x_offset = hub_index * LOCAL_WIDTH
 
     last_message = None

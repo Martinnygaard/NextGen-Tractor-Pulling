@@ -514,73 +514,42 @@ class HubConnection {
             };
 
             try {
-                // Display hubs cannot be auto-started reliably over BLE.
-                // Every variation we have tried (ack-write, no-ack-write,
-                // immediate disconnect, post-start disconnect, 2 s sleep
-                // on the hub before observe_channels) ends in the same
-                // failure: program starts, freezes a couple of seconds
-                // in, never reaches steady state. Manual hub-button
-                // starts of the exact same flashed program always work,
-                // so the program itself is fine — something about the
-                // PWA-initiated start path leaves the BLE radio in a
-                // state the firmware can't reconfigure cleanly. Skip
-                // auto-start entirely for display hubs: disconnect now,
-                // tell the user to press the center button on the hub.
-                // Sled and master keep the auto-start flow because they
-                // never enter observer mode.
-                const isDisplay = /^display\d+$/.test(this.label);
+                // Retry the canonical ACK-START flow for ALL hubs now
+                // that we send the proper META(0) -> RAM -> META(size)
+                // upload sequence (which actually commits the program
+                // to flash on shutdown). Display hubs get the diagnostic
+                // prints in scoreboard_display.run_display_hub so we can
+                // see over BLE stdout exactly where (if anywhere) the
+                // program freezes.
+                await this.commandChar.writeValueWithResponse(
+                    new Uint8Array([CMD_START_USER_PROGRAM, 0]),
+                );
+                log(`${this.label}: START_USER_PROGRAM (ack)`);
 
-                if (isDisplay) {
+                let running = await waitForStart(2500);
+
+                if (!running) {
+                    // Fallback: legacy 1-byte START with ACK in case
+                    // the firmware is on an older profile that does
+                    // not accept the slot byte.
+                    log(`${this.label}: START gav ingen status — prøver legacy [0x01] med ACK`);
+                    await new Promise((r) => setTimeout(r, 600));
                     try {
-                        this.device.gatt.disconnect();
+                        await this.commandChar.writeValueWithResponse(
+                            new Uint8Array([CMD_START_USER_PROGRAM]),
+                        );
+                        log(`${this.label}: START_USER_PROGRAM legacy (ack)`);
                     } catch (e) {
-                        // gattserverdisconnected handler tidies up.
+                        log(`${this.label}: legacy ACK-START fejlede (${e && e.message ? e.message : e})`);
                     }
-                    this.flashError =
-                        "Flash OK — tryk på hub-knappen (midt) for at starte programmet";
-                    log(`${this.label}: ${this.flashError}`);
+                    running = await waitForStart(2500);
+                }
+
+                if (running) {
+                    log(`${this.label}: program startet automatisk`);
                 } else {
-                    // Sled / master: keep the connection and verify the
-                    // running flag the same way as before.
-                    //
-                    // Display 2's BLE stack silently drops
-                    // writeValueWithoutResponse for START_USER_PROGRAM
-                    // (META and RAM writes go through fine on the same
-                    // fast path). Using writeValueWithResponse for START
-                    // makes the host wait for the firmware ACK before
-                    // returning, which is reliable on every hub we have
-                    // tested. Other commands stay on the no-response
-                    // fast path.
-                    await this.commandChar.writeValueWithResponse(
-                        new Uint8Array([CMD_START_USER_PROGRAM, 0]),
-                    );
-                    log(`${this.label}: START_USER_PROGRAM (ack)`);
-
-                    let running = await waitForStart(2500);
-
-                    if (!running) {
-                        // Fallback: legacy 1-byte START with ACK in case
-                        // the firmware is on an older profile that does
-                        // not accept the slot byte.
-                        log(`${this.label}: START gav ingen status — prøver legacy [0x01] med ACK`);
-                        await new Promise((r) => setTimeout(r, 600));
-                        try {
-                            await this.commandChar.writeValueWithResponse(
-                                new Uint8Array([CMD_START_USER_PROGRAM]),
-                            );
-                            log(`${this.label}: START_USER_PROGRAM legacy (ack)`);
-                        } catch (e) {
-                            log(`${this.label}: legacy ACK-START fejlede (${e && e.message ? e.message : e})`);
-                        }
-                        running = await waitForStart(2500);
-                    }
-
-                    if (running) {
-                        log(`${this.label}: program startet automatisk`);
-                    } else {
-                        this.flashError = "Programmet startede ikke — tryk på hub-knappen eller prøv igen";
-                        log(`${this.label}: ${this.flashError}`);
-                    }
+                    this.flashError = "Programmet startede ikke — tryk på hub-knappen eller prøv igen";
+                    log(`${this.label}: ${this.flashError}`);
                 }
             } catch (e) {
                 this.flashError = `Auto-start fejlede: ${e && e.message ? e.message : e}`;
