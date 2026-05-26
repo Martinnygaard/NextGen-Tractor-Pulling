@@ -2,6 +2,17 @@
 const PYBRICKS_SERVICE = "c5f50001-8280-46da-89f4-6d8051e4aeef";
 const PYBRICKS_COMMAND_EVENT_CHAR = "c5f50002-8280-46da-89f4-6d8051e4aeef";
 const PYBRICKS_HUB_CAPS_CHAR = "c5f50003-8280-46da-89f4-6d8051e4aeef";
+// Nordic UART Service. Pybricks Profile v1.0–1.2 routed program stdio
+// through here. Pybricks Profile v1.3+ moved stdout to EVT_WRITE_STDOUT
+// on the Pybricks command/event char, but on some firmware builds the
+// hub still emits program output on NUS TX. Subscribe to both.
+const NUS_SERVICE = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const NUS_TX_CHAR = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // hub → host
+const NUS_RX_CHAR = "6e400002-b5a3-f393-e0a9-e50e24dcca9e"; // host → hub
+// Standard Device Information Service / Software Revision String.
+const DEVICE_INFO_SERVICE = 0x180a;
+const SOFTWARE_REVISION_CHAR = 0x2a28;
+const FIRMWARE_REVISION_CHAR = 0x2a26;
 
 const CMD_STOP_USER_PROGRAM = 0x00;
 const CMD_START_USER_PROGRAM = 0x01;
@@ -171,7 +182,7 @@ class HubConnection {
         }
         this.device = await navigator.bluetooth.requestDevice({
             filters: [{ namePrefix: this.namePrefix }],
-            optionalServices: [PYBRICKS_SERVICE],
+            optionalServices: [PYBRICKS_SERVICE, NUS_SERVICE, DEVICE_INFO_SERVICE],
         });
         this.device.addEventListener("gattserverdisconnected", () => {
             log(`${this.label}: afbrudt`);
@@ -235,6 +246,46 @@ class HubConnection {
             // Older firmware may not expose the capability characteristic.
         }
 
+        // Read Software Revision (= Pybricks Profile version) so we know
+        // whether the hub routes stdout through EVT_WRITE_STDOUT
+        // (Profile v1.3+) or only through the Nordic UART Service
+        // (Profile <= v1.2).
+        try {
+            const infoSvc = await this.server.getPrimaryService(DEVICE_INFO_SERVICE);
+            try {
+                const swChar = await infoSvc.getCharacteristic(SOFTWARE_REVISION_CHAR);
+                const sw = await swChar.readValue();
+                const swStr = new TextDecoder().decode(sw);
+                log(`${this.label}: Pybricks Profile = ${swStr}`);
+            } catch (e) { /* ignore */ }
+            try {
+                const fwChar = await infoSvc.getCharacteristic(FIRMWARE_REVISION_CHAR);
+                const fw = await fwChar.readValue();
+                const fwStr = new TextDecoder().decode(fw);
+                log(`${this.label}: firmware = ${fwStr}`);
+            } catch (e) { /* ignore */ }
+        } catch (e) {
+            log(`${this.label}: device info service utilgængelig (${e && e.message ? e.message : e})`);
+        }
+
+        // Subscribe to Nordic UART Service TX (hub -> host) so we catch
+        // any program stdout the firmware routes through NUS instead of
+        // the Pybricks event char. Notifications are forwarded into the
+        // same stdout buffer/handler used for EVT_WRITE_STDOUT.
+        try {
+            const nusSvc = await this.server.getPrimaryService(NUS_SERVICE);
+            try {
+                const nusTx = await nusSvc.getCharacteristic(NUS_TX_CHAR);
+                await nusTx.startNotifications();
+                nusTx.addEventListener("characteristicvaluechanged", (e) => this._onNusEvent(e));
+                log(`${this.label}: NUS TX subscribed (stdout fallback)`);
+            } catch (e) {
+                log(`${this.label}: NUS TX utilgængelig (${e && e.message ? e.message : e})`);
+            }
+        } catch (e) {
+            log(`${this.label}: NUS service utilgængelig (${e && e.message ? e.message : e})`);
+        }
+
         log(`${this.label}: forbundet til ${this.device.name}`);
         try {
             const p = this.commandChar.properties || {};
@@ -250,6 +301,38 @@ class HubConnection {
     async disconnect() {
         if (this.device && this.device.gatt && this.device.gatt.connected) {
             this.device.gatt.disconnect();
+        }
+    }
+
+    _onNusEvent(event) {
+        // Pybricks Profile <= v1.2 routes program stdio through the
+        // Nordic UART Service. The payload here is just raw bytes
+        // (no event-id prefix), so feed it straight into the stdout
+        // line buffer.
+        const dv = event.target.value;
+        if (!dv || dv.byteLength < 1) return;
+        const data = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+        const hex = Array.from(data)
+            .slice(0, 32)
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join(" ");
+        log(`${this.label}: NUS RX len=${data.byteLength} [${hex}${data.byteLength > 32 ? " …" : ""}]`);
+        const text = new TextDecoder().decode(data);
+        this.stdoutBuffer += text;
+        let idx;
+        while ((idx = this.stdoutBuffer.indexOf("\n")) >= 0) {
+            const line = this.stdoutBuffer.slice(0, idx).replace(/\r$/, "");
+            this.stdoutBuffer = this.stdoutBuffer.slice(idx + 1);
+            if (!line.length) continue;
+            if (line.startsWith("VERSION ")) {
+                const parts = line.split(/\s+/);
+                if (parts.length >= 3) {
+                    this.actualVersion = parts[parts.length - 1];
+                    this.onStateChange();
+                }
+            }
+            if (this.onLine) this.onLine(line);
+            log(`${this.label}: ${line}`);
         }
     }
 
