@@ -171,6 +171,16 @@ def make_hub_matrices():
 
 
 def run_display_hub(hub_index, rotations):
+    # When the PWA flashed + started this program, the BLE radio was
+    # still tearing down the GATT link the moment we begin executing.
+    # Calling PrimeHub(observe_channels=[...]) before that teardown is
+    # complete makes the firmware deadlock a couple of seconds in
+    # (program freezes, status light stops rotating). Pause briefly so
+    # the central-mode disconnect can settle before we ask the radio to
+    # switch into observer mode. Manual hub-button starts pay this same
+    # cost but never notice it because nothing was connected to begin
+    # with.
+    wait(2000)
     hub = PrimeHub(observe_channels=[CHANNEL])
     matrices = make_hub_matrices()
     global_x_offset = hub_index * LOCAL_WIDTH
