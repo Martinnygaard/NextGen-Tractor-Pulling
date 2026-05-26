@@ -1,4 +1,5 @@
-# BISECT-TEST 11: 20 prints (between working 99B and failing 577B).
+# BISECT-TEST 12: unique startup marker to confirm which program runs
+print("BISECT12_GO")
 print("L01")
 print("L02")
 print("L03")
@@ -19,4 +20,4 @@ print("L17")
 print("L18")
 print("L19")
 print("L20")
-print("DONE")
+print("BISECT12_END")
