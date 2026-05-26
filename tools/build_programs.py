@@ -76,6 +76,85 @@ def stage_hubs_dir(repo_root: Path, dest: Path, version: str) -> None:
         out.write_text(text, encoding="utf-8")
 
 
+# Entry points that should be inlined into a single .py before compilation.
+# Pybricks firmware 3.6 + pybricksdev 2.3 produce a multi-mpy bundle for
+# anything that has local imports; the resulting bundle triggers a
+# "RuntimeError: name too long" on the hub when the imported submodule's
+# qstr window is parsed (see Display 2 logs from build v193c9a2c). Single
+# .mpy files load cleanly, so we concatenate the dependency chain here.
+# Order matters: the leaves come first so their definitions are in scope
+# by the time the entry point's top-level code runs.
+INLINE_CHAINS: dict[str, list[str]] = {
+    "display_1.py": ["display_logic.py", "scoreboard_display.py"],
+    "display_2.py": ["display_logic.py", "scoreboard_display.py"],
+    "display_3.py": ["display_logic.py", "scoreboard_display.py"],
+}
+
+# Regex matches `from <name> import ...` for any of the modules we inline.
+# Handles both `from display_logic import x` and `from hubs.display_logic
+# import x` plus the `try/except ImportError` fallback by erasing the
+# whole multi-line statement and any wrapping try/except block.
+_INLINE_MODULE_NAMES = {"display_logic", "scoreboard_display"}
+
+
+def _strip_local_imports(text: str) -> str:
+    """Replace ``from <mod> import ...`` statements (incl. parenthesised
+    multi-line forms) for any module we inline with a ``pass`` statement
+    at the same indentation. Using ``pass`` keeps surrounding ``try`` /
+    ``except ImportError`` blocks syntactically valid without us having
+    to understand their structure."""
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    n = len(lines)
+    while i < n:
+        line = lines[i]
+        stripped = line.lstrip()
+        m = re.match(r"from\s+(?:hubs\.)?([A-Za-z_][\w]*)\s+import\b", stripped)
+        if m and m.group(1) in _INLINE_MODULE_NAMES:
+            indent = line[: len(line) - len(stripped)]
+            # If this opens a parenthesised multi-line import, skip until
+            # the closing ')'.
+            if "(" in line and ")" not in line:
+                i += 1
+                while i < n and ")" not in lines[i]:
+                    i += 1
+                i += 1  # consume the ')'
+            else:
+                i += 1
+            out.append(f"{indent}pass  # inlined import removed\n")
+            continue
+        out.append(line)
+        i += 1
+    return "".join(out)
+
+
+def maybe_inline_entry(staged: Path, entry_name: str) -> Path:
+    """If ``entry_name`` is in INLINE_CHAINS, create a sibling file with the
+    deps concatenated and the local imports stripped, returning that path.
+    Otherwise return the original staged path."""
+    chain = INLINE_CHAINS.get(entry_name)
+    if not chain:
+        return staged / entry_name
+
+    pieces: list[str] = []
+    for dep in chain:
+        dep_text = (staged / dep).read_text(encoding="utf-8")
+        pieces.append(f"# --- inlined from {dep} ---\n")
+        pieces.append(_strip_local_imports(dep_text))
+        if not pieces[-1].endswith("\n"):
+            pieces.append("\n")
+
+    entry_text = (staged / entry_name).read_text(encoding="utf-8")
+    pieces.append(f"# --- entry {entry_name} ---\n")
+    pieces.append(_strip_local_imports(entry_text))
+
+    inlined = staged / f"_inlined_{entry_name}"
+    inlined.write_text("".join(pieces), encoding="utf-8")
+    return inlined
+
+
+
 async def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent
     out_dir = repo_root / "web-app" / "programs"
@@ -93,7 +172,7 @@ async def main() -> int:
 
         for label, rel_path in ENTRIES.items():
             entry_name = Path(rel_path).name
-            entry = staged / entry_name
+            entry = maybe_inline_entry(staged, entry_name)
             if not entry.exists():
                 print(f"SKIP {label}: {rel_path} not found")
                 failed.append(label)
