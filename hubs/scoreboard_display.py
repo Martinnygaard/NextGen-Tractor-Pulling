@@ -82,6 +82,15 @@ except ImportError:
 CHANNEL = 1
 LAST_MESSAGE_TIMEOUT_MS = 1000
 
+# Startup grace period: when a program is auto-started via BLE
+# (START_USER_PROGRAM), the hub's BLE stdout notification channel is
+# not yet ready to drain. Any print() emitted during the first few
+# hundred ms blocks the firmware's stdout buffer (mp_event_wait_indefinite
+# in mp_hal_stdout_tx_strn), causing the central to time out and
+# disconnect at ~8 s. Waiting 500 ms gives the BLE stdout pipe time to
+# come up so subsequent prints stream cleanly.
+wait(500)
+
 # Version string; CI replaces __NGTP_VERSION__ with the git short SHA at
 # build time (see tools/build_programs.py). Shared by all 3 display hubs.
 VERSION = "__NGTP_VERSION__"
