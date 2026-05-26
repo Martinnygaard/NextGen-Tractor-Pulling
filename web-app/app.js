@@ -470,26 +470,46 @@ class HubConnection {
             };
 
             try {
-                // Attempt 1: standard v1.4+ START with slot=0.
+                // Attempt 1: standard v1.4+ START with slot=0 (fast path,
+                // typically uses write-without-response just like all
+                // other commands during the upload).
                 await this.startProgram();
                 let running = await waitForRunning(2500);
 
                 if (!running) {
-                    // Attempt 2: legacy 1-byte START (v1.2-v1.3 firmware
-                    // accepts it; some v1.4 firmware in slot-less mode
-                    // also responds to this rather than [0x01, slot]).
-                    log(`${this.label}: START gav ingen status — prøver legacy START [0x01]`);
-                    await new Promise((r) => setTimeout(r, 800));
-                    await this._writeCommand(new Uint8Array([CMD_START_USER_PROGRAM]));
+                    // Attempt 2: same standard START but force
+                    // writeValueWithResponse. On some hubs the
+                    // no-response write is silently dropped by the BLE
+                    // stack for commands that block on validation —
+                    // Display 2 in particular flashes successfully (hub
+                    // button can start the freshly written program) but
+                    // ignores the no-response START packet entirely.
+                    log(`${this.label}: START gav ingen status — prøver START med ACK (writeWithResponse)`);
+                    await new Promise((r) => setTimeout(r, 600));
+                    try {
+                        await this.commandChar.writeValueWithResponse(
+                            new Uint8Array([CMD_START_USER_PROGRAM, 0]),
+                        );
+                        log(`${this.label}: START_USER_PROGRAM (ack)`);
+                    } catch (e) {
+                        log(`${this.label}: ACK-START fejlede (${e && e.message ? e.message : e})`);
+                    }
                     running = await waitForRunning(2500);
                 }
 
                 if (!running) {
-                    // Attempt 3: standard START with slot=0 again, after
-                    // a longer flash-commit settle.
-                    log(`${this.label}: legacy START hjalp ikke — prøver standard START igen`);
-                    await new Promise((r) => setTimeout(r, 1500));
-                    await this.startProgram();
+                    // Attempt 3: legacy 1-byte START with ACK. Pre-v1.4
+                    // firmware accepts this form.
+                    log(`${this.label}: ACK-START hjalp ikke — prøver legacy START [0x01] med ACK`);
+                    await new Promise((r) => setTimeout(r, 800));
+                    try {
+                        await this.commandChar.writeValueWithResponse(
+                            new Uint8Array([CMD_START_USER_PROGRAM]),
+                        );
+                        log(`${this.label}: START_USER_PROGRAM legacy (ack)`);
+                    } catch (e) {
+                        log(`${this.label}: legacy ACK-START fejlede (${e && e.message ? e.message : e})`);
+                    }
                     running = await waitForRunning(2500);
                 }
 
