@@ -82,14 +82,20 @@ except ImportError:
 CHANNEL = 1
 LAST_MESSAGE_TIMEOUT_MS = 1000
 
-# Startup grace period: when a program is auto-started via BLE
-# (START_USER_PROGRAM), the hub's BLE stdout notification channel is
-# not yet ready to drain. Any print() emitted during the first few
-# hundred ms blocks the firmware's stdout buffer (mp_event_wait_indefinite
-# in mp_hal_stdout_tx_strn), causing the central to time out and
-# disconnect at ~8 s. Waiting 500 ms gives the BLE stdout pipe time to
-# come up so subsequent prints stream cleanly.
+# WORKAROUND for auto-start BLE stdout race:
+# When PWA sends START_USER_PROGRAM, the hub's BLE stdout notification
+# channel is not ready until the first pybricks Hub() instance is
+# constructed. Any print() before that blocks the firmware on
+# mp_event_wait_indefinite, the central times out, and the link drops
+# after ~8 s with zero output. Constructing PrimeHub() here wakes the
+# stdout pipe AND gives us a visual LED marker so we can confirm the
+# program actually got this far even if BLE stdout is still broken.
+_boot_hub = PrimeHub()
+_boot_hub.light.on(Color.GREEN)
+wait(1500)
+_boot_hub.light.on(Color.YELLOW)
 wait(500)
+del _boot_hub
 
 # Version string; CI replaces __NGTP_VERSION__ with the git short SHA at
 # build time (see tools/build_programs.py). Shared by all 3 display hubs.
