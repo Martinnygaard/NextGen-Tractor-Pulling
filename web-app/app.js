@@ -266,6 +266,9 @@ class HubConnection {
                 const wasFirst = !this.hasStatus;
                 this.statusFlags = flags >>> 0;
                 this.hasStatus = true;
+                if (this.isProgramRunning()) {
+                    this.everRanSinceFlash = true;
+                }
                 const progId = data.byteLength > 5 ? data[5] : 0;
                 const slot = data.byteLength > 6 ? data[6] : 0;
                 if (wasFirst) {
@@ -469,39 +472,41 @@ class HubConnection {
                 return false;
             };
 
-            try {
-                // Attempt 1: standard v1.4+ START with slot=0 (fast path,
-                // typically uses write-without-response just like all
-                // other commands during the upload).
-                await this.startProgram();
-                let running = await waitForRunning(2500);
-
-                if (!running) {
-                    // Attempt 2: same standard START but force
-                    // writeValueWithResponse. On some hubs the
-                    // no-response write is silently dropped by the BLE
-                    // stack for commands that block on validation —
-                    // Display 2 in particular flashes successfully (hub
-                    // button can start the freshly written program) but
-                    // ignores the no-response START packet entirely.
-                    log(`${this.label}: START gav ingen status — prøver START med ACK (writeWithResponse)`);
-                    await new Promise((r) => setTimeout(r, 600));
-                    try {
-                        await this.commandChar.writeValueWithResponse(
-                            new Uint8Array([CMD_START_USER_PROGRAM, 0]),
-                        );
-                        log(`${this.label}: START_USER_PROGRAM (ack)`);
-                    } catch (e) {
-                        log(`${this.label}: ACK-START fejlede (${e && e.message ? e.message : e})`);
-                    }
-                    running = await waitForRunning(2500);
+            // Watch for the USER_PROGRAM_RUNNING flag flipping on *or*
+            // off-after-on, so we also recognise short-lived programs
+            // (like our minimal test that finishes before waitForRunning
+            // polls) as a successful start.
+            this.everRanSinceFlash = false;
+            const everRanSnapshot = () => this.everRanSinceFlash;
+            const waitForStart = async (timeoutMs) => {
+                const deadline = Date.now() + timeoutMs;
+                while (Date.now() < deadline) {
+                    if (this.isProgramRunning() || everRanSnapshot()) return true;
+                    await new Promise((r) => setTimeout(r, 75));
                 }
+                return false;
+            };
+
+            try {
+                // Display 2's BLE stack silently drops
+                // writeValueWithoutResponse for START_USER_PROGRAM (META
+                // and RAM writes go through fine on the same fast path).
+                // Using writeValueWithResponse for START makes the host
+                // wait for the firmware ACK before returning, which is
+                // reliable on every hub we have tested. Other commands
+                // stay on the no-response fast path.
+                await this.commandChar.writeValueWithResponse(
+                    new Uint8Array([CMD_START_USER_PROGRAM, 0]),
+                );
+                log(`${this.label}: START_USER_PROGRAM (ack)`);
+                let running = await waitForStart(2500);
 
                 if (!running) {
-                    // Attempt 3: legacy 1-byte START with ACK. Pre-v1.4
-                    // firmware accepts this form.
-                    log(`${this.label}: ACK-START hjalp ikke — prøver legacy START [0x01] med ACK`);
-                    await new Promise((r) => setTimeout(r, 800));
+                    // Fallback: legacy 1-byte START with ACK in case the
+                    // firmware is on an older profile that does not
+                    // accept the slot byte.
+                    log(`${this.label}: START gav ingen status — prøver legacy [0x01] med ACK`);
+                    await new Promise((r) => setTimeout(r, 600));
                     try {
                         await this.commandChar.writeValueWithResponse(
                             new Uint8Array([CMD_START_USER_PROGRAM]),
@@ -510,7 +515,7 @@ class HubConnection {
                     } catch (e) {
                         log(`${this.label}: legacy ACK-START fejlede (${e && e.message ? e.message : e})`);
                     }
-                    running = await waitForRunning(2500);
+                    running = await waitForStart(2500);
                 }
 
                 if (running) {
