@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="da">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Scoreboard</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        color: #ff3b30;
+        font-family: "Bebas Neue", "Arial Black", sans-serif;
+        overflow: hidden;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        cursor: none;
+      }
+      #score {
+        font-size: 60vh;
+        line-height: 1;
+        letter-spacing: 0.04em;
+        text-shadow: 0 0 30px rgba(255, 59, 48, 0.6);
+        font-variant-numeric: tabular-nums;
+      }
+      #score.full-pull {
+        color: #ffcc00;
+        font-size: 22vh;
+        text-shadow: 0 0 40px rgba(255, 204, 0, 0.8);
+        animation: blink 0.6s steps(1) infinite;
+      }
+      #meta {
+        position: fixed;
+        bottom: 1vh;
+        right: 2vw;
+        font-family: monospace;
+        color: #444;
+        font-size: 2vh;
+      }
+      @keyframes blink {
+        50% { opacity: 0.2; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="score">000</div>
+    <div id="meta"></div>
+    <script>
+      const scoreEl = document.getElementById("score");
+      const metaEl = document.getElementById("meta");
+      let lastErr = 0;
+
+      function format(n) {
+        const v = Math.max(0, Math.min(999, Math.round(n || 0)));
+        return v.toString().padStart(3, "0");
+      }
+
+      async function tick() {
+        try {
+          const r = await fetch("/api/live", { cache: "no-store" });
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          const live = await r.json();
+          const sb = live.scoreboard || {};
+          if (sb.full_pull) {
+            scoreEl.classList.add("full-pull");
+            scoreEl.textContent = "FULL PULL";
+          } else {
+            scoreEl.classList.remove("full-pull");
+            scoreEl.textContent = format(sb.score);
+          }
+          metaEl.textContent = "dist " + (live.distance_m ?? 0).toFixed(1) + " m";
+          lastErr = 0;
+        } catch (e) {
+          lastErr++;
+          metaEl.textContent = "offline (" + lastErr + ")";
+        }
+      }
+
+      tick();
+      setInterval(tick, 250);
+
+      // Click toggles fullscreen.
+      document.body.addEventListener("click", () => {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        } else {
+          document.exitFullscreen().catch(() => {});
+        }
+      });
+    </script>
+  </body>
+</html>
