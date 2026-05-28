@@ -15,10 +15,13 @@
   ],
   "settings": {
     "python.analysis.typeCheckingMode": "basic",
-    "python.defaultInterpreterPath": "${workspaceFolder:Raspberry Server}/.venv/Scripts/python.exe",
+    "python.defaultInterpreterPath": "${workspaceFolder:NextGen-tractor-pulling}/.venv/Scripts/python.exe",
     "files.exclude": {
       "**/__pycache__": true,
       "**/.pytest_cache": true
+    },
+    "chat.tools.terminal.autoApprove": {
+      "py": true
     }
   }
 }

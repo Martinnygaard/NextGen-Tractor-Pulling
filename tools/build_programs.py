@@ -85,16 +85,16 @@ def stage_hubs_dir(repo_root: Path, dest: Path, version: str) -> None:
 # Order matters: the leaves come first so their definitions are in scope
 # by the time the entry point's top-level code runs.
 INLINE_CHAINS: dict[str, list[str]] = {
-    "display_1.py": ["display_logic.py", "scoreboard_display.py"],
-    "display_2.py": ["display_logic.py", "scoreboard_display.py"],
-    "display_3.py": ["display_logic.py", "scoreboard_display.py"],
+    "display_1.py": ["display_common.py"],
+    "display_2.py": ["display_common.py"],
+    "display_3.py": ["display_common.py"],
 }
 
 # Regex matches `from <name> import ...` for any of the modules we inline.
-# Handles both `from display_logic import x` and `from hubs.display_logic
+# Handles both `from display_common import x` and `from hubs.display_common
 # import x` plus the `try/except ImportError` fallback by erasing the
 # whole multi-line statement and any wrapping try/except block.
-_INLINE_MODULE_NAMES = {"display_logic", "scoreboard_display"}
+_INLINE_MODULE_NAMES = {"display_common"}
 
 
 def _strip_local_imports(text: str) -> str:
@@ -139,10 +139,10 @@ def maybe_inline_entry(staged: Path, entry_name: str) -> Path:
 
     pieces: list[str] = []
     # Boot marker — printed before ANY import so that if the program runs
-    # at all we will see this over BLE stdout. If the inlined entry
-    # crashes during imports (e.g. a module-level `try_import_hub()` call
-    # in scoreboard_display.py raising ImportError), the traceback might
-    # not be flushed but this print will already have made it out.
+    # at all we will see this over BLE stdout. NOTE: display_common.py
+    # constructs PrimeHub() at module load time precisely so this print
+    # (and any subsequent ones) survive the BLE-stdout race; keep this
+    # marker AFTER inlining so the hub is alive when it fires.
     pieces.append('print("[boot] inlined entry alive")\n')
     for dep in chain:
         dep_text = (staged / dep).read_text(encoding="utf-8")

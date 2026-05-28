@@ -11,7 +11,7 @@ Når filsystemet ikke understøtter mapper, brug unikke filnavne for hver hub:
 - `display_1.py` - venstre display-hub
 - `display_2.py` - midterste display-hub
 - `display_3.py` - højre display-hub
-- `scoreboard_display.py` - fælles display-logik til alle tre display-hubs
+- `display_common.py` - fælles display-logik til alle tre display-hubs
 
 ### Troubleshooting hub detection
 

@@ -1,14 +1,22 @@
-from scoreboard_display import run_display_hub
+# display_2.py - middle display hub. Global columns 6..11.
+# See display_1.py.
 
+try:
+    from hubs.display_common import boot, run_display, SLED_CHANNEL
+except ImportError:
+    from display_common import boot, run_display, SLED_CHANNEL
 
-# Display hub 2 controls global matrix columns 3..5.
+boot(observe_channels=[SLED_CHANNEL])
+
 HUB_INDEX = 1
 
-# Local matrix layout:
-# [A][C][E]
-# [B][D][F]
-# Compensate for 90 deg CW hardware rotation by rotating matrices 270 deg.
-ROTATIONS = [270, 270, 270, 270, 270, 270]
+PORT_GRID = [
+    ["B", "A"],
+    ["D", "C"],
+    ["F", "E"],
+]
 
+ROTATION = 270
 
-run_display_hub(HUB_INDEX, ROTATIONS)
+run_display(HUB_INDEX, PORT_GRID, ROTATION)
+
