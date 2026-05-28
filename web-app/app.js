@@ -375,8 +375,26 @@ class HubConnection {
 
     async startProgram() {
         if (!this.commandChar) return;
-        await this._writeCommand(new Uint8Array([CMD_START_USER_PROGRAM, 0]));
-        log(`${this.label}: START_USER_PROGRAM`);
+        // Use with-response so we actually see GATT errors (e.g. "no program
+        // in slot 0"). If the firmware doesn't accept the 2-byte form, fall
+        // back to the legacy 1-byte START.
+        try {
+            await this.commandChar.writeValueWithResponse(
+                new Uint8Array([CMD_START_USER_PROGRAM, 0]),
+            );
+            log(`${this.label}: START_USER_PROGRAM (slot 0)`);
+        } catch (e) {
+            log(`${this.label}: START [0x01,0x00] fejlede (${e && e.message ? e.message : e}) — prøver legacy [0x01]`);
+            try {
+                await this.commandChar.writeValueWithResponse(
+                    new Uint8Array([CMD_START_USER_PROGRAM]),
+                );
+                log(`${this.label}: START_USER_PROGRAM (legacy)`);
+            } catch (e2) {
+                log(`${this.label}: START fejlede helt (${e2 && e2.message ? e2.message : e2}) — er programmet flashet via deploy.py?`);
+                throw e2;
+            }
+        }
     }
 
     async stopProgram() {
