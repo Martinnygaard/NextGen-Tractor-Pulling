@@ -451,8 +451,6 @@ def apply_command(seq, action, value):
 
 
 _stdin_buf = b""
-_stdin_diag_printed = False
-_stdin_byte_count = 0
 
 
 def _read_stdin_line():
@@ -462,10 +460,7 @@ def _read_stdin_line():
     like ``C <seq> <action> <value>\n`` (same format as the old master
     relay used) so apply_command() can dispatch them unchanged.
     """
-    global _stdin_buf, _stdin_diag_printed, _stdin_byte_count
-    if not _stdin_diag_printed:
-        _stdin_diag_printed = True
-        print("STDIN diag: read_input_byte=%s" % ("yes" if _read_input_byte else "NO"))
+    global _stdin_buf
     if _read_input_byte is None:
         return None
     # Drain everything currently buffered. Stops when read_input_byte()
@@ -473,20 +468,15 @@ def _read_stdin_line():
     while True:
         try:
             b = _read_input_byte()
-        except Exception as e:
-            print("STDIN read err:", e)
+        except Exception:
             return None
         if b is None or b < 0:
             return None
-        _stdin_byte_count += 1
-        print("STDIN b#%d=0x%02x" % (_stdin_byte_count, b))
         if b == 0x0A:  # \n
             line = _stdin_buf
             _stdin_buf = b""
             try:
-                decoded = line.decode().strip()
-                print("STDIN line:", decoded)
-                return decoded
+                return line.decode().strip()
             except Exception:
                 return None
         if b == 0x0D:  # \r — ignore
