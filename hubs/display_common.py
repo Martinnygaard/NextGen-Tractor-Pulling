@@ -278,11 +278,17 @@ def _decode_sled(val):
     if isinstance(val, tuple) and len(val) >= 3:
         try:
             distance = int(val[0])
-            full_pull = int(val[2])
+            flags = int(val[2])
         except Exception:
             return None
+        full_pull = (flags & 0x1) != 0
+        visible = (flags & 0x2) != 0
         if full_pull:
-            return (MODE_FULL_PULL, 0)
+            # Carry the distance through so the FULL PULL animation can
+            # blink the actual result number on the displays.
+            return (MODE_FULL_PULL, distance)
+        if not visible:
+            return (MODE_BLANK, 0)
         return (MODE_NUMBER, distance)
     # Bare int -> treat as distance (handy for quick test broadcasts).
     try:
@@ -315,10 +321,32 @@ def run_display(hub_index, port_grid, rotation=270):
     full_w = len(full_strip[0])
     blank = [[False] * GLOBAL_W for _ in range(GLOBAL_H)]
 
+    # FULL PULL animation: scroll "FULL PULL!!!" once, blink the
+    # distance, repeat once more, then stay blank until the sled clears
+    # the full_pull flag (next pull). Duration of one scroll = full_w *
+    # SCROLL_STEP_MS plus a small tail so the text fully leaves the
+    # canvas.
+    SCROLL_MS = full_w * SCROLL_STEP_MS
+    BLINK_ON_MS = 500
+    BLINK_OFF_MS = 300
+    BLINK_CYCLES = 3
+    BLINK_MS = BLINK_CYCLES * (BLINK_ON_MS + BLINK_OFF_MS)
+    # (phase_name, duration_ms). idle has duration 0 -> sticks until mode change.
+    FULL_PULL_PHASES = (
+        ("scroll", SCROLL_MS),
+        ("blink",  BLINK_MS),
+        ("scroll", SCROLL_MS),
+        ("blink",  BLINK_MS),
+        ("idle",   0),
+    )
+
     sw = StopWatch()
     mode = MODE_BLANK
     value = 0
     anchor_ms = 0
+    fp_value = 0          # distance to blink during FULL PULL
+    fp_phase = 0          # index into FULL_PULL_PHASES
+    fp_phase_start = 0    # ms when current phase began
 
     while True:
         now = sw.time()
@@ -328,6 +356,10 @@ def run_display(hub_index, port_grid, rotation=270):
             new_mode, new_value = decoded
             if new_mode != mode:
                 anchor_ms = now
+                if new_mode == MODE_FULL_PULL:
+                    fp_value = new_value
+                    fp_phase = 0
+                    fp_phase_start = now
             mode = new_mode
             value = new_value
 
@@ -338,9 +370,33 @@ def run_display(hub_index, port_grid, rotation=270):
                 canvas = blank
             _HUB.light.on(Color.WHITE)
         elif mode == MODE_FULL_PULL:
-            offset = ((now - anchor_ms) // SCROLL_STEP_MS) % full_w
-            canvas = render_scroll_frame(full_strip, offset)
-            _HUB.light.on(Color.GREEN)
+            phase_name, phase_dur = FULL_PULL_PHASES[fp_phase]
+            elapsed = now - fp_phase_start
+            # Advance to next phase when the current one expires.
+            # idle has dur=0 and never advances.
+            if phase_dur > 0 and elapsed >= phase_dur and fp_phase < len(FULL_PULL_PHASES) - 1:
+                fp_phase += 1
+                fp_phase_start = now
+                phase_name, phase_dur = FULL_PULL_PHASES[fp_phase]
+                elapsed = 0
+
+            if phase_name == "scroll":
+                offset = (elapsed // SCROLL_STEP_MS) % full_w
+                canvas = render_scroll_frame(full_strip, offset)
+                _HUB.light.on(Color.GREEN)
+            elif phase_name == "blink":
+                slot = elapsed % (BLINK_ON_MS + BLINK_OFF_MS)
+                if slot < BLINK_ON_MS:
+                    try:
+                        canvas = render_number(fp_value)
+                    except KeyError:
+                        canvas = blank
+                else:
+                    canvas = blank
+                _HUB.light.on(Color.GREEN)
+            else:  # idle - blank until sled clears full_pull and a new pull starts
+                canvas = blank
+                _HUB.light.on(Color.GREEN)
         else:  # MODE_BLANK
             canvas = blank
             _HUB.light.on(Color.RED)

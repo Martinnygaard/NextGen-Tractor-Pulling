@@ -18,7 +18,7 @@
                 <h1>Control Deck</h1>
             </div>
             <div class="hero-actions">
-                <button type="button" id="btn-hubs" class="pill pill-hubs">Hubs 0/2</button>
+                <button type="button" id="btn-hubs" class="pill pill-hubs">Hub 0/1</button>
                 <button type="button" id="btn-manual" class="pill">Manual</button>
                 <button type="button" id="btn-settings" class="pill">Settings</button>
             </div>
@@ -31,22 +31,6 @@
                     <h2>Hub-forbindelser</h2>
                     <button type="button" class="btn btn-close" data-close-dialog>Luk</button>
                 </header>
-
-                <div class="hub-block">
-                    <div class="hub-block-head">
-                        <span class="hub-label">Master</span>
-                        <span id="status" class="status">Ikke forbundet</span>
-                    </div>
-                    <div class="row">
-                        <button id="btn-connect" class="btn btn-primary">Forbind</button>
-                        <button id="btn-disconnect" class="btn" disabled>Afbryd</button>
-                    </div>
-                    <div class="row">
-                        <button id="btn-start-program" class="btn" disabled>Start program</button>
-                        <button id="btn-stop-program" class="btn" disabled>Stop program</button>
-                        <button id="btn-flash-master" class="btn" disabled>Opdatér program</button>
-                    </div>
-                </div>
 
                 <div class="hub-block">
                     <div class="hub-block-head">
@@ -65,57 +49,9 @@
                     </div>
                 </div>
 
-                <div class="hub-block">
-                    <div class="hub-block-head">
-                        <span class="hub-label">Display 1</span>
-                        <span id="display1-status" class="status">Ikke forbundet</span>
-                    </div>
-                    <div class="row">
-                        <button id="btn-display1-connect" class="btn btn-primary">Forbind</button>
-                        <button id="btn-display1-disconnect" class="btn" disabled>Afbryd</button>
-                    </div>
-                    <div class="row">
-                        <button id="btn-display1-start" class="btn" disabled>Start program</button>
-                        <button id="btn-display1-stop" class="btn" disabled>Stop program</button>
-                        <button id="btn-flash-display1" class="btn" disabled>Opdatér program</button>
-                    </div>
-                </div>
-
-                <div class="hub-block">
-                    <div class="hub-block-head">
-                        <span class="hub-label">Display 2</span>
-                        <span id="display2-status" class="status">Ikke forbundet</span>
-                    </div>
-                    <div class="row">
-                        <button id="btn-display2-connect" class="btn btn-primary">Forbind</button>
-                        <button id="btn-display2-disconnect" class="btn" disabled>Afbryd</button>
-                    </div>
-                    <div class="row">
-                        <button id="btn-display2-start" class="btn" disabled>Start program</button>
-                        <button id="btn-display2-stop" class="btn" disabled>Stop program</button>
-                        <button id="btn-flash-display2" class="btn" disabled>Opdatér program</button>
-                    </div>
-                </div>
-
-                <div class="hub-block">
-                    <div class="hub-block-head">
-                        <span class="hub-label">Display 3</span>
-                        <span id="display3-status" class="status">Ikke forbundet</span>
-                    </div>
-                    <div class="row">
-                        <button id="btn-display3-connect" class="btn btn-primary">Forbind</button>
-                        <button id="btn-display3-disconnect" class="btn" disabled>Afbryd</button>
-                    </div>
-                    <div class="row">
-                        <button id="btn-display3-start" class="btn" disabled>Start program</button>
-                        <button id="btn-display3-stop" class="btn" disabled>Stop program</button>
-                        <button id="btn-flash-display3" class="btn" disabled>Opdatér program</button>
-                    </div>
-                </div>
-
                 <p class="hint">
-                    <strong>Rækkefølge:</strong> boot hub (kort tryk) → Forbind → Start program.
-                    Når en hub broadcaster, kan ingen nye forbindelser oprettes, så forbind først.
+                    <strong>Rækkefølge:</strong> boot sled (kort tryk) → Forbind → Start program.
+                    Displays lytter selv på sled'ens BLE-broadcast og kræver ingen forbindelse herfra.
                 </p>
             </div>
         </dialog>
@@ -149,7 +85,7 @@
                 <div class="row">
                     <button type="button" id="btn-push-config-2" class="btn btn-primary">Push til hub</button>
                 </div>
-                <p class="hint">Gemmes lokalt på telefonen. "Push til hub" kræver at master er forbundet.</p>
+                <p class="hint">Gemmes lokalt på telefonen. Ændringer pushes automatisk når sled er forbundet.</p>
 
                 <div class="row">
                     <button type="button" id="btn-force-reload" class="btn btn-warning">Force reload (ryd
@@ -213,11 +149,6 @@
                 <button class="btn btn-primary sled-action" data-action="start_pull" disabled>Start</button>
                 <button class="btn btn-warning sled-action" data-action="stop_pull" disabled>Stop</button>
                 <button class="btn sled-action" data-action="reset_distance" disabled>Reset</button>
-            </div>
-            <div class="row score-row">
-                <input id="score" type="number" min="0" max="999" value="0" />
-                <button id="btn-send-score" class="btn btn-primary" disabled>Set score</button>
-                <button id="btn-full-pull" class="btn btn-warning" disabled>FULL PULL</button>
             </div>
         </section>
 

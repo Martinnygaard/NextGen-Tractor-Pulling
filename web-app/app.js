@@ -54,13 +54,6 @@ const ui = {
     manualDialog: document.getElementById("manual-dialog"),
     settingsDialog: document.getElementById("settings-dialog"),
 
-    // Master
-    connect: document.getElementById("btn-connect"),
-    disconnect: document.getElementById("btn-disconnect"),
-    startProgram: document.getElementById("btn-start-program"),
-    stopProgram: document.getElementById("btn-stop-program"),
-    status: document.getElementById("status"),
-
     // Sled
     sledConnect: document.getElementById("btn-sled-connect"),
     sledDisconnect: document.getElementById("btn-sled-disconnect"),
@@ -70,34 +63,10 @@ const ui = {
     sledPushCfg2: document.getElementById("btn-push-config-2"),
     sledStatus: document.getElementById("sled-status"),
 
-    // Displays
-    display1Connect: document.getElementById("btn-display1-connect"),
-    display1Disconnect: document.getElementById("btn-display1-disconnect"),
-    display1Start: document.getElementById("btn-display1-start"),
-    display1Stop: document.getElementById("btn-display1-stop"),
-    display1Status: document.getElementById("display1-status"),
-    display2Connect: document.getElementById("btn-display2-connect"),
-    display2Disconnect: document.getElementById("btn-display2-disconnect"),
-    display2Start: document.getElementById("btn-display2-start"),
-    display2Stop: document.getElementById("btn-display2-stop"),
-    display2Status: document.getElementById("display2-status"),
-    display3Connect: document.getElementById("btn-display3-connect"),
-    display3Disconnect: document.getElementById("btn-display3-disconnect"),
-    display3Start: document.getElementById("btn-display3-start"),
-    display3Stop: document.getElementById("btn-display3-stop"),
-    display3Status: document.getElementById("display3-status"),
-
     // Flash (program upload) buttons
-    flashMaster: document.getElementById("btn-flash-master"),
     flashSled: document.getElementById("btn-flash-sled"),
-    flashDisplay1: document.getElementById("btn-flash-display1"),
-    flashDisplay2: document.getElementById("btn-flash-display2"),
-    flashDisplay3: document.getElementById("btn-flash-display3"),
 
-    // Score + sled
-    sendScore: document.getElementById("btn-send-score"),
-    fullPull: document.getElementById("btn-full-pull"),
-    score: document.getElementById("score"),
+    // Sled actions (manual)
     sledButtons: document.querySelectorAll(".sled-action"),
 
     // Config
@@ -669,36 +638,24 @@ class HubConnection {
 
 // ---------------- Hub instances ----------------
 
-const master = new HubConnection("master", "Puller Master", (line) => {
-    if (line.startsWith("D ")) {
-        const v = parseInt(line.slice(2).trim(), 10);
-        if (!Number.isNaN(v)) setDistance(v / 10);
-        return;
-    }
-    if (line.startsWith("A ")) {
-        const v = parseInt(line.slice(2).trim(), 10);
-        if (!Number.isNaN(v) && ui.lastAck) ui.lastAck.textContent = String(v);
-        return;
+// PWA talks ONLY to the sled. Sled broadcasts distance/full-pull on
+// BLE channel 2; the display hubs observe that channel directly and
+// require no involvement from the PWA. Sled commands (start/stop/etc)
+// are written to Pybricks stdin over the Nordic UART RX char.
+const sled = new HubConnection("sled", "Puller Sled", (line) => {
+    // Sled prints "DBG mode=... lane_m=X.Y sled_pct=Z events=..."
+    // once a second. Parse lane_m to drive the live distance card.
+    const m = line.match(/lane_m=(-?\d+(?:\.\d+)?)/);
+    if (m) {
+        const v = parseFloat(m[1]);
+        if (!Number.isNaN(v)) setDistance(v);
     }
 });
 
-const sled = new HubConnection("sled", "Puller Sled", null);
-
-const displays = [
-    new HubConnection("display1", "Puller Score 1", null),
-    new HubConnection("display2", "Puller Score 2", null),
-    new HubConnection("display3", "Puller Score 3", null),
-];
-const [display1, display2, display3] = displays;
-
 // .mpy program bundles produced by tools/build_programs.py in CI and shipped
-// alongside the PWA. Each entry maps a HubConnection label to the bundle URL.
+// alongside the PWA. Only the sled is reachable from the PWA now.
 const PROGRAM_URLS = {
-    master: "programs/master.mpy",
     sled: "programs/sled.mpy",
-    display1: "programs/display1.mpy",
-    display2: "programs/display2.mpy",
-    display3: "programs/display3.mpy",
 };
 
 // Loaded from web-app/programs/manifest.json on startup. Maps label -> version
@@ -709,8 +666,6 @@ let programManifest = { version: null, programs: {} };
 function expectedVersionFor(label) {
     const entry = programManifest.programs && programManifest.programs[label];
     if (!entry) return null;
-    // Displays all share scoreboard_display.py, so their VERSION print is the
-    // same for all three. Compare against any display* entry.
     return entry.version || programManifest.version || null;
 }
 
@@ -783,26 +738,11 @@ function hubStatusKind(hub) {
 }
 
 function refreshUi() {
-    const m = master.isConnected();
     const s = sled.isConnected();
-    const dConnected = displays.map((d) => d.isConnected());
-    const dCount = dConnected.filter(Boolean).length;
-    const totalConnected = (m ? 1 : 0) + (s ? 1 : 0) + dCount;
-    const totalHubs = 2 + displays.length;
 
     // Top-right pill
-    ui.hubsBtn.textContent = `Hubs ${totalConnected}/${totalHubs}`;
-    ui.hubsBtn.dataset.kind = totalConnected === totalHubs
-        ? "ok"
-        : (totalConnected === 0 ? "off" : "partial");
-
-    // Master block
-    setStatus(ui.status, hubStatusText(master), hubStatusKind(master));
-    ui.connect.disabled = m;
-    ui.disconnect.disabled = !m;
-    ui.startProgram.disabled = !m || master.isProgramRunning() || master.flashing;
-    ui.stopProgram.disabled = !m || !master.isProgramRunning();
-    if (ui.flashMaster) ui.flashMaster.disabled = !m || master.flashing;
+    ui.hubsBtn.textContent = `Hub ${s ? 1 : 0}/1`;
+    ui.hubsBtn.dataset.kind = s ? "ok" : "off";
 
     // Sled block
     setStatus(ui.sledStatus, hubStatusText(sled), hubStatusKind(sled));
@@ -812,43 +752,16 @@ function refreshUi() {
     ui.sledStop.disabled = !s || !sled.isProgramRunning();
     if (ui.flashSled) ui.flashSled.disabled = !s || sled.flashing;
 
-    // Display blocks
-    displays.forEach((d, i) => {
-        const n = i + 1;
-        const connected = d.isConnected();
-        setStatus(ui[`display${n}Status`], hubStatusText(d), hubStatusKind(d));
-        ui[`display${n}Connect`].disabled = connected;
-        ui[`display${n}Disconnect`].disabled = !connected;
-        ui[`display${n}Start`].disabled = !connected || d.isProgramRunning() || d.flashing;
-        ui[`display${n}Stop`].disabled = !connected || !d.isProgramRunning();
-        const flashBtn = ui[`flashDisplay${n}`];
-        if (flashBtn) flashBtn.disabled = !connected || d.flashing;
-    });
-
-    // Score / pull / sled actions go through master
-    ui.sendScore.disabled = !m;
-    ui.fullPull.disabled = !m;
-    ui.sledButtons.forEach((b) => { b.disabled = !m; });
-    ui.sledPushCfg.disabled = !m;
-    if (ui.sledPushCfg2) ui.sledPushCfg2.disabled = !m;
+    // Pull / manual / push-config buttons require sled program running.
+    const sledReady = s && sled.isProgramRunning();
+    ui.sledButtons.forEach((b) => { b.disabled = !sledReady; });
+    ui.sledPushCfg.disabled = !sledReady;
+    if (ui.sledPushCfg2) ui.sledPushCfg2.disabled = !sledReady;
 }
 
-master.onStateChange = refreshUi;
 sled.onStateChange = refreshUi;
-displays.forEach((d) => { d.onStateChange = refreshUi; });
 
-// ---------------- Score + sled commands ----------------
-
-async function sendScore(value) {
-    const score = Math.max(0, Math.min(999, Number(value) || 0));
-    const line = `S ${score}\n`;
-    try {
-        await master.writeStdin(line);
-        log("tx: " + line.trim());
-    } catch (err) {
-        log("FEJL ved send: " + (err && err.message ? err.message : err));
-    }
-}
+// ---------------- Sled commands ----------------
 
 async function sendSledCommand(action, value) {
     const actionId = SLED_ACTIONS[action];
@@ -862,7 +775,7 @@ async function sendSledCommand(action, value) {
     const line = `C ${seq} ${actionId} ${v}\n`;
     if (ui.lastSeq) ui.lastSeq.textContent = String(seq);
     try {
-        await master.writeStdin(line);
+        await sled.writeStdin(line);
         log(`tx: ${action}(${v}) seq=${seq}`);
     } catch (err) {
         log("FEJL sled-cmd: " + (err && err.message ? err.message : err));
@@ -933,21 +846,6 @@ document.querySelectorAll("[data-close-dialog]").forEach((btn) => {
     });
 });
 
-ui.connect.addEventListener("click", async () => {
-    try { await master.connect(); }
-    catch (e) {
-        setStatus(ui.status, "Forbindelse fejlede", "error");
-        log("FEJL master: " + (e && e.message ? e.message : String(e)));
-    }
-});
-ui.disconnect.addEventListener("click", () => master.disconnect());
-ui.startProgram.addEventListener("click", async () => {
-    try { await master.startProgram(); } catch (e) { log("FEJL start: " + e.message); }
-});
-ui.stopProgram.addEventListener("click", async () => {
-    try { await master.stopProgram(); } catch (e) { log("FEJL stop: " + e.message); }
-});
-
 ui.sledConnect.addEventListener("click", async () => {
     try { await sled.connect(); }
     catch (e) {
@@ -965,32 +863,7 @@ ui.sledStop.addEventListener("click", async () => {
 ui.sledPushCfg.addEventListener("click", () => pushConfig());
 if (ui.sledPushCfg2) ui.sledPushCfg2.addEventListener("click", () => pushConfig());
 
-if (ui.flashMaster) ui.flashMaster.addEventListener("click", () => flashHub(master));
 if (ui.flashSled) ui.flashSled.addEventListener("click", () => flashHub(sled));
-
-displays.forEach((d, i) => {
-    const n = i + 1;
-    const statusEl = ui[`display${n}Status`];
-    ui[`display${n}Connect`].addEventListener("click", async () => {
-        try { await d.connect(); }
-        catch (e) {
-            setStatus(statusEl, "Forbindelse fejlede", "error");
-            log(`FEJL display${n}: ` + (e && e.message ? e.message : String(e)));
-        }
-    });
-    ui[`display${n}Disconnect`].addEventListener("click", () => d.disconnect());
-    ui[`display${n}Start`].addEventListener("click", async () => {
-        try { await d.startProgram(); } catch (e) { log(`FEJL display${n} start: ` + e.message); }
-    });
-    ui[`display${n}Stop`].addEventListener("click", async () => {
-        try { await d.stopProgram(); } catch (e) { log(`FEJL display${n} stop: ` + e.message); }
-    });
-    const flashBtn = ui[`flashDisplay${n}`];
-    if (flashBtn) flashBtn.addEventListener("click", () => flashHub(d));
-});
-
-ui.sendScore.addEventListener("click", () => sendScore(ui.score.value));
-ui.fullPull.addEventListener("click", () => sendScore(10000));
 
 ui.sledButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1005,8 +878,21 @@ ui.sledButtons.forEach((btn) => {
     });
 });
 
+// Debounced auto-push of ramp_end_m / full_rotations to the sled
+// whenever the slider/input changes - so the operator doesn't have to
+// remember to hit "Push til hub" after tweaking calibration.
+let _cfgAutoPushTimer = null;
+function scheduleAutoPushConfig() {
+    if (_cfgAutoPushTimer) clearTimeout(_cfgAutoPushTimer);
+    _cfgAutoPushTimer = setTimeout(async () => {
+        _cfgAutoPushTimer = null;
+        if (!sled || !sled.isConnected || !sled.isConnected()) return;
+        try { await pushConfig(); } catch (e) { log("FEJL auto-push config: " + e.message); }
+    }, 400);
+}
+
 [ui.cfgRamp, ui.cfgRot].forEach((el) => {
-    el.addEventListener("input", () => { renderCfgLabels(); saveConfig(); });
+    el.addEventListener("input", () => { renderCfgLabels(); saveConfig(); scheduleAutoPushConfig(); });
 });
 
 // Plate count +/- and input

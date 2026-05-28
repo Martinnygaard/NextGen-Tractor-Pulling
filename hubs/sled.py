@@ -7,6 +7,19 @@ try:
 except Exception:
     Light = None
 
+# Optional non-blocking stdin reader. Used to accept commands directly from
+# the PWA over the Nordic UART (Pybricks stdin) so no master relay is
+# needed. Falls back to no-op on firmware that lacks uselect.
+try:
+    import uselect
+except Exception:
+    uselect = None
+
+try:
+    import usys as sys
+except Exception:
+    import sys
+
 
 def pybricks_import(name, fromlist=None):
     try:
@@ -344,8 +357,18 @@ def flush_debug(mode, distance_m, now_ms):
 
 
 def broadcast_status(distance_m):
+    # Encode display state as bit flags so the displays know when to
+    # stay blank instead of mirroring encoder noise from manual moves.
+    #   bit 0 (0x1) = full_pull_signal (run scroll/blink animation)
+    #   bit 1 (0x2) = visible (a pull is active or full-pull screen)
+    # When neither bit is set the displays render MODE_BLANK.
+    flags = 0
+    if full_pull_signal:
+        flags |= 0x1
+    if _pull_active or full_pull_signal:
+        flags |= 0x2
     try:
-        hub.ble.broadcast((int(distance_m), int(last_command_seq), 1 if full_pull_signal else 0))
+        hub.ble.broadcast((int(distance_m), int(last_command_seq), int(flags)))
     except Exception:
         pass
 
@@ -432,6 +455,66 @@ def apply_command(seq, action, value):
         queue_debug_event("CMD seq=%d unknown action=%d value=%d" % (seq, action, value))
 
 
+def _read_stdin_line():
+    """Non-blocking read of one line from stdin, or None if no data.
+
+    The PWA writes Pybricks stdin via the Nordic UART RX char. Lines look
+    like ``C <seq> <action> <value>\n`` (same format as the old master
+    relay used) so apply_command() can dispatch them unchanged.
+    """
+    if uselect is None:
+        return None
+    try:
+        poller = uselect.poll()
+        poller.register(sys.stdin, uselect.POLLIN)
+        events = poller.poll(0)
+    except Exception:
+        return None
+    if not events:
+        return None
+    try:
+        line = sys.stdin.readline()
+    except Exception:
+        return None
+    if not line:
+        return None
+    return line.strip()
+
+
+_stdin_seen_seqs = set()
+
+
+def _handle_stdin_line(line):
+    if not line:
+        return
+    parts = line.split()
+    if not parts:
+        return
+    if parts[0] != "C" or len(parts) < 4:
+        print("STDIN ?", line)
+        return
+    try:
+        seq = int(parts[1])
+        action = int(parts[2])
+        value = int(parts[3])
+    except Exception:
+        print("STDIN parse error:", line)
+        return
+    # Deduplicate retransmits without rejecting low seqs on reconnect.
+    if seq in _stdin_seen_seqs:
+        return
+    _stdin_seen_seqs.add(seq)
+    # Cap memory of the dedup set.
+    if len(_stdin_seen_seqs) > 256:
+        try:
+            _stdin_seen_seqs.clear()
+            _stdin_seen_seqs.add(seq)
+        except Exception:
+            pass
+    print("STDIN C", seq, action, value)
+    apply_command(seq, action, value)
+
+
 def poll_commands():
     """Read latest broadcast on SCOREBOARD_CHANNEL and dispatch new commands.
 
@@ -443,6 +526,14 @@ def poll_commands():
 
     poll_stop_button()
     poll_local_start_button()
+
+    # Accept commands directly from the PWA via stdin (NUS write).
+    # Drain anything pending so a burst of writes is applied in one loop.
+    while True:
+        sline = _read_stdin_line()
+        if sline is None:
+            break
+        _handle_stdin_line(sline)
 
     try:
         msg = hub.ble.observe(SCOREBOARD_CHANNEL)
@@ -657,9 +748,10 @@ def distance_m_from_encoder():
     real_m = -distance_encoder.angle() * REAL_METERS_PER_DEGREE
     if real_m < 0:
         real_m = 0.0
-    if real_m > REAL_FULL_DISTANCE_M:
-        real_m = REAL_FULL_DISTANCE_M
-    return real_m * DISPLAY_SCALE  # convert to LEGO metres (0-100)
+    # Note: no upper cap. The displays can render up to 3-digit numbers,
+    # so let the actual score through even if the tractor pulls past the
+    # calibrated full-pull distance.
+    return real_m * DISPLAY_SCALE  # convert to LEGO metres
 
 
 
@@ -681,11 +773,18 @@ def run_pull_mode():
     flag_start_pull = False
     flag_stop_pull = False
     _pull_active = True
+    # Clear any leftover FULL PULL from the previous run so the displays
+    # switch back to live distance for this new pull.
+    if full_pull_signal:
+        full_pull_signal = False
+        queue_debug_event("EXEC clear_full_pull (new pull)")
     ensure_pull_start_state()
     debug_pending_events.clear()
     debug_last_state = None
 
-    # Red for 5 seconds while tractor gets ready.
+    # Red for 5 seconds while tractor gets ready. The displays should
+    # show 0 during this phase even if the tractor is creeping on the
+    # encoder; the real score doesn't start counting until green.
     set_signal(True, False)
     queue_debug_event("STATE READY (RED) - waiting for tractor")
     ready_start = watch.time()
@@ -697,11 +796,17 @@ def run_pull_mode():
             flush_debug(MODE_PULL, distance_m_from_encoder(), watch.time())
             return
         set_signal(True, False)
-        broadcast_status(distance_m_from_encoder())
-        flush_debug(MODE_PULL, distance_m_from_encoder(), watch.time())
+        broadcast_status(0)
+        flush_debug(MODE_PULL, 0, watch.time())
         wait(MAIN_LOOP_WAIT_MS)
 
-    # Green means pull can start.
+    # Green means pull can start. Zero the encoder NOW so the score on
+    # the displays starts from 0 the instant the tractor sees green.
+    try:
+        distance_encoder.reset_angle(0)
+        queue_debug_event("EXEC reset_distance (GREEN start)")
+    except Exception:
+        pass
     set_signal(False, True)
     queue_debug_event("STATE PULL_START (GREEN) - tractor can begin pull")
 
