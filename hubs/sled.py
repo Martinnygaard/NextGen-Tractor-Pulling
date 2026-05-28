@@ -76,6 +76,7 @@ DISTANCE_CHANNEL = 2
 # build time (see tools/build_programs.py).
 VERSION = "__NGTP_VERSION__"
 print("VERSION sled", VERSION)
+print("RIB avail=", _read_input_byte is not None)
 
 # Sled command actions (must match server/bridge_client.py SLED_ACTION_MAP).
 CMD_NOOP = 0
@@ -469,10 +470,12 @@ def _read_stdin_line():
     while True:
         try:
             b = _read_input_byte()
-        except Exception:
+        except Exception as e:
+            print("RIB exc", e)
             return None
         if b is None or b < 0:
             return None
+        print("RIB b=", b)
         if b == 0x0A:  # \n
             line = _stdin_buf
             _stdin_buf = b""
