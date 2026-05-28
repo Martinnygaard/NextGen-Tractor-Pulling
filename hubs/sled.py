@@ -479,13 +479,14 @@ def _read_stdin_line():
         if b is None or b < 0:
             return None
         _stdin_byte_count += 1
-        if _stdin_byte_count <= 5 or _stdin_byte_count % 50 == 0:
-            print("STDIN byte#%d=0x%02x" % (_stdin_byte_count, b))
+        print("STDIN b#%d=0x%02x" % (_stdin_byte_count, b))
         if b == 0x0A:  # \n
             line = _stdin_buf
             _stdin_buf = b""
             try:
-                return line.decode().strip()
+                decoded = line.decode().strip()
+                print("STDIN line:", decoded)
+                return decoded
             except Exception:
                 return None
         if b == 0x0D:  # \r — ignore
