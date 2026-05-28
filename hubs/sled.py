@@ -374,6 +374,7 @@ def apply_command(seq, action, value):
     global flag_start_pull, flag_stop_pull, flag_home_weight, flag_reset_distance
     global WEIGHT_RAMP_END_M, FULL_DISTANCE_ROTATIONS, REAL_METERS_PER_DEGREE
 
+    print("APPLY", seq, action, value)
     if action == CMD_START_PULL:
         flag_start_pull = True
         queue_debug_event("CMD seq=%d start_pull" % seq)
