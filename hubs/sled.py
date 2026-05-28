@@ -374,7 +374,6 @@ def apply_command(seq, action, value):
     global flag_start_pull, flag_stop_pull, flag_home_weight, flag_reset_distance
     global WEIGHT_RAMP_END_M, FULL_DISTANCE_ROTATIONS, REAL_METERS_PER_DEGREE
 
-    print("APPLY", seq, action, value)
     if action == CMD_START_PULL:
         flag_start_pull = True
         queue_debug_event("CMD seq=%d start_pull" % seq)
@@ -475,10 +474,12 @@ def _read_stdin_line():
             line = _stdin_buf
             _stdin_buf = b""
             try:
-                s = line.decode().strip()
+                s = str(line, "utf-8").strip()
             except Exception:
-                return None
-            print("LINE", s)
+                try:
+                    s = "".join(chr(x) for x in line).strip()
+                except Exception:
+                    return None
             return s
         if b == 0x0D:  # \r
             continue

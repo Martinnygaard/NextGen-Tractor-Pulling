@@ -715,9 +715,205 @@ class PybricksExecAdapter(BaseAdapter):
         self._send_score(message)
 
 
+class DirectSledAdapter(BaseAdapter):
+    """Connects directly to the sled hub via Pybricks BLE, uploads/runs
+    `hubs/sled.py`, and pipes commands to its stdin. Use when there is no
+    master hub and the PC bridge talks straight to the sled.
+
+    Hub stdout lines are printed with a `[sled]` prefix and parsed for
+    `D <distance>` (forwarded to /api/distance) and `A <seq>` (acks)."""
+
+    def __init__(self, sled_hub, timeout_seconds, http_client):
+        self.sled_hub = (sled_hub or "").strip()
+        self.timeout_seconds = timeout_seconds
+        self._http = http_client
+        self._lock = threading.Lock()
+        self._cmd_seq = 0
+        self._loop = None
+        self._hub = None
+        self._connected = False
+        self._connect_started = False
+        self._thread = None
+        self._stdout_buf = b""
+        self._hub_states_lock = threading.Lock()
+        self._hub_states = {}
+        self._set_hub_state("sled", self.sled_hub, False, "starting")
+
+    # ----- hub status -----
+    def _set_hub_state(self, label, name, connected, error):
+        with self._hub_states_lock:
+            self._hub_states[label] = {
+                "label": label,
+                "name": name,
+                "connected": bool(connected),
+                "error": None if error is None else str(error),
+            }
+
+    def get_hub_states(self):
+        with self._hub_states_lock:
+            return list(self._hub_states.values())
+
+    # ----- adapter interface -----
+    def start(self):
+        if not self.sled_hub:
+            raise RuntimeError("Missing sled hub name. Set NGTP_SLED_HUB.")
+        if self._connect_started:
+            return
+        self._connect_started = True
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
+
+    def _run_loop(self):
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        try:
+            self._loop.run_until_complete(self._reconnect_forever())
+        except Exception as exc:
+            print("Bridge: sled loop crashed: %r" % (exc,))
+            self._set_hub_state("sled", self.sled_hub, False, exc)
+        finally:
+            try:
+                self._loop.run_until_complete(asyncio.sleep(0))
+            except Exception:
+                pass
+
+    async def _reconnect_forever(self):
+        while True:
+            try:
+                await self._connect_and_run()
+            except Exception as exc:
+                print("Bridge: sled session failed: %r" % (exc,))
+                self._set_hub_state("sled", self.sled_hub, False, exc)
+            self._connected = False
+            self._hub = None
+            print("Bridge: sled disconnected, retrying in 5s...")
+            await asyncio.sleep(5.0)
+
+    async def _connect_and_run(self):
+        from pybricksdev.ble import find_device
+        from pybricksdev.connections.pybricks import PybricksHubBLE
+
+        print("Bridge: scanning for sled hub '%s'" % self.sled_hub)
+        device = await find_device(self.sled_hub, timeout=self.timeout_seconds)
+        print("Bridge: sled found, connecting...")
+        hub = PybricksHubBLE(device)
+        await hub.connect()
+        self._hub = hub
+
+        def on_stdout(data):
+            try:
+                self._stdout_buf += bytes(data)
+            except Exception:
+                return
+            while b"\n" in self._stdout_buf:
+                raw, self._stdout_buf = self._stdout_buf.split(b"\n", 1)
+                text = raw.decode("utf-8", errors="replace").rstrip()
+                if not text:
+                    continue
+                print("[sled]", text)
+                self._handle_sled_line(text)
+
+        hub.stdout_observable.subscribe(on_stdout)
+
+        self._connected = True
+        self._set_hub_state("sled", self.sled_hub, True, None)
+        print("Bridge: starting sled.py on hub")
+
+        try:
+            await hub.run(
+                str(SLED_SCRIPT),
+                wait=True,
+                print_output=False,
+                line_handler=False,
+            )
+            print("Bridge: sled.py ended")
+        except Exception as exc:
+            print("Bridge: sled.py error: %r" % (exc,))
+        finally:
+            self._connected = False
+            self._set_hub_state("sled", self.sled_hub, False, "program ended")
+
+    def _handle_sled_line(self, line):
+        parts = line.split()
+        if not parts:
+            return
+        head = parts[0]
+        if head == "D" and len(parts) >= 2:
+            try:
+                distance = int(parts[1])
+            except Exception:
+                return
+            try:
+                self._http.post_json("/api/distance/%d" % distance)
+            except Exception:
+                pass
+
+    def handle_sled(self, client, command):
+        if not self._connected or self._hub is None or self._loop is None:
+            raise HubUnavailable("sled not connected")
+
+        payload = command.get("payload", {})
+        action = payload.get("action")
+        value = payload.get("value")
+
+        action_int = SLED_ACTION_MAP.get(action)
+        if action_int is None:
+            raise RuntimeError("Unknown sled action '%s'" % action)
+
+        if action == "set_weight_percent":
+            try:
+                value_int = int(value)
+            except Exception:
+                value_int = 0
+            value_int = max(-1, min(100, value_int))
+        elif action in ("set_ramp_end_m", "set_full_rotations"):
+            try:
+                value_int = int(round(float(value) * 10.0))
+            except Exception:
+                value_int = 0
+            value_int = max(0, value_int)
+        else:
+            value_int = 0
+
+        with self._lock:
+            self._cmd_seq += 1
+            seq = self._cmd_seq
+
+        line = "C %d %d %d\n" % (seq, action_int, value_int)
+        fut = asyncio.run_coroutine_threadsafe(
+            self._hub.write_string(line), self._loop
+        )
+        try:
+            fut.result(timeout=5.0)
+        except Exception as exc:
+            self._connected = False
+            self._set_hub_state("sled", self.sled_hub, False, exc)
+            raise HubUnavailable("sled stdin write failed: %r" % exc)
+        print("Bridge: sled cmd %d seq=%d action=%s value=%d" % (
+            int(command["id"]), seq, action, value_int))
+
+    def handle_scoreboard(self, client, command):
+        # Scoreboard kører i loopback fra serveren (egen state) i denne mode.
+        payload = command.get("payload", {})
+        action = payload.get("action")
+        value = payload.get("value")
+        if action == "set_score":
+            client.post_json("/api/score/%d" % int(value or 0))
+        elif action == "full_pull":
+            client.post_json("/api/full-pull")
+        elif action in ("blank", "reset"):
+            client.post_json("/api/reset")
+
+
 def get_adapter(http_client):
     if MODE == "log":
         return LoggingAdapter()
+    if MODE == "direct-sled":
+        return DirectSledAdapter(
+            sled_hub=PYBRICKS_SLED_HUB,
+            timeout_seconds=PYBRICKS_TIMEOUT,
+            http_client=http_client,
+        )
     if MODE == "pybricks":
         return PybricksExecAdapter(
             scoreboard_hub=PYBRICKS_SCOREBOARD_HUB,
