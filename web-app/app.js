@@ -16,8 +16,6 @@ const FIRMWARE_REVISION_CHAR = 0x2a26;
 
 const CMD_STOP_USER_PROGRAM = 0x00;
 const CMD_START_USER_PROGRAM = 0x01;
-const CMD_WRITE_USER_PROGRAM_META = 0x03;
-const CMD_WRITE_USER_RAM = 0x04;
 const CMD_WRITE_STDIN = 0x06;
 const EVT_STATUS_REPORT = 0x00;
 const EVT_WRITE_STDOUT = 0x01;
@@ -62,9 +60,6 @@ const ui = {
     sledPushCfg: document.getElementById("btn-push-config"),
     sledPushCfg2: document.getElementById("btn-push-config-2"),
     sledStatus: document.getElementById("sled-status"),
-
-    // Flash (program upload) buttons
-    flashSled: document.getElementById("btn-flash-sled"),
 
     // Sled actions (manual)
     sledButtons: document.querySelectorAll(".sled-action"),
@@ -129,11 +124,6 @@ class HubConnection {
         this.stdoutBuffer = "";
         this.statusFlags = 0;
         this.hasStatus = false;
-        this.flashing = false;
-        this.flashProgress = 0;
-        this.flashSuccessUntil = 0;  // epoch ms — show "flashet ✓" briefly
-        this.flashError = null;      // last flash error message, sticky for ~6s
-        this.actualVersion = null;   // set from "VERSION ..." stdout line
         this.onStateChange = () => { };
     }
 
@@ -160,8 +150,6 @@ class HubConnection {
             this.server = null;
             this.statusFlags = 0;
             this.hasStatus = false;
-            this.flashing = false;
-            this.actualVersion = null;
             this._cmdUseNoResp = undefined;
             this._ramFallbackLogged = false;
             this.onStateChange();
@@ -293,13 +281,6 @@ class HubConnection {
             const line = this.stdoutBuffer.slice(0, idx).replace(/\r$/, "");
             this.stdoutBuffer = this.stdoutBuffer.slice(idx + 1);
             if (!line.length) continue;
-            if (line.startsWith("VERSION ")) {
-                const parts = line.split(/\s+/);
-                if (parts.length >= 3) {
-                    this.actualVersion = parts[parts.length - 1];
-                    this.onStateChange();
-                }
-            }
             if (this.onLine) this.onLine(line);
             log(`${this.label}: ${line}`);
         }
@@ -328,9 +309,6 @@ class HubConnection {
                 const wasFirst = !this.hasStatus;
                 this.statusFlags = flags >>> 0;
                 this.hasStatus = true;
-                if (this.isProgramRunning()) {
-                    this.everRanSinceFlash = true;
-                }
                 const progId = data.byteLength > 5 ? data[5] : 0;
                 const slot = data.byteLength > 6 ? data[6] : 0;
                 if (wasFirst) {
@@ -354,15 +332,6 @@ class HubConnection {
                 const line = this.stdoutBuffer.slice(0, idx).replace(/\r$/, "");
                 this.stdoutBuffer = this.stdoutBuffer.slice(idx + 1);
                 if (!line.length) continue;
-                // Hub programs print "VERSION <kind> <sha>" at boot. Capture it
-                // so the UI can compare against the manifest.
-                if (line.startsWith("VERSION ")) {
-                    const parts = line.split(/\s+/);
-                    if (parts.length >= 3) {
-                        this.actualVersion = parts[parts.length - 1];
-                        this.onStateChange();
-                    }
-                }
                 if (this.onLine) this.onLine(line);
                 log(`${this.label}: ${line}`);
             }
@@ -415,225 +384,6 @@ class HubConnection {
         await this._writeCommand(new Uint8Array([CMD_STOP_USER_PROGRAM]));
         log(`${this.label}: STOP_USER_PROGRAM`);
     }
-
-    async flashProgram(mpyUrl) {
-        if (!this.commandChar) throw new Error("Ikke forbundet");
-        if (this.flashing) throw new Error("Allerede ved at flashe");
-
-        // Fetch the .mpy bundle from the deployed PWA (cache-busted).
-        const url = mpyUrl + (mpyUrl.includes("?") ? "&" : "?") + "ts=" + Date.now();
-        log(`${this.label}: henter ${url}`);
-        const resp = await fetch(url, { cache: "no-store" });
-        if (!resp.ok) throw new Error(`Hentning fejlede: HTTP ${resp.status}`);
-        const data = new Uint8Array(await resp.arrayBuffer());
-        if (data.length === 0) throw new Error("Tomt program");
-        // Sanity-check: an mpy bundle is binary; HTML 404 fallback pages from
-        // GitHub Pages start with "<" so we'd see that here. Bail loudly.
-        if (data[0] === 0x3c /* '<' */) {
-            throw new Error(`Forventede .mpy, fik HTML (${data.length} bytes) — bygges nok stadig`);
-        }
-        log(`${this.label}: hentet ${data.length} bytes, maxWriteSize=${this.maxWriteSize}`);
-
-        // Stop any running program first (best-effort) and give it a moment
-        // to actually halt before we start writing the new bundle. Pybricks
-        // firmware needs ~half a second to fully tear down a running program
-        // — sending META too soon comes back as "GATT Error Unknown".
-        try {
-            await this.stopProgram();
-            await new Promise((r) => setTimeout(r, 600));
-        } catch (_) { /* ignore */ }
-
-        this.flashing = true;
-        this.flashProgress = 0;
-        this.actualVersion = null;
-        this.onStateChange();
-
-        try {
-            // Each WRITE_USER_RAM frame is: 1 byte cmd + 4 byte offset + payload.
-            const overhead = 1 + 4;
-            // DEBUG: bump cap so we use fewer/bigger chunks. If the
-            // corruption is at chunk boundaries, fewer boundaries = fewer
-            // failures. 200 means a 577-byte program fits in 3 chunks.
-            const safeMax = Math.min(this.maxWriteSize, 200);
-            const chunkSize = Math.max(16, safeMax - overhead);
-            const totalChunks = Math.ceil(data.length / chunkSize);
-            log(`${this.label}: flasher ${data.length} bytes i ${totalChunks} chunks à ${chunkSize}`);
-
-            // Canonical Pybricks v1.2+ upload procedure (see
-            // pybricks-ble-profile.md):
-            //   1. META(size=0)         → invalidates any persisted slot 0
-            //                              program; firmware erases flash so
-            //                              the new image can be committed.
-            //   2. RAM chunks           → stream the .mpy into user RAM.
-            //   3. META(size=actual)    → commit: firmware persists the RAM
-            //                              buffer to flash slot 0 and marks
-            //                              it as the runnable program.
-            // Skipping step 1 or 3 leaves slot 0 pointing at the previously
-            // flashed program (e.g. the green/red test from Pybricks Code),
-            // which is what the hub center button starts.
-            {
-                const buf = new Uint8Array(5);
-                buf[0] = CMD_WRITE_USER_PROGRAM_META;
-                new DataView(buf.buffer).setUint32(1, 0, true);
-                try {
-                    await this._writeCommand(buf);
-                } catch (e) {
-                    log(`${this.label}: META(0) retry efter ${e && e.message ? e.message : e}`);
-                    await new Promise((r) => setTimeout(r, 800));
-                    await this._writeCommand(buf);
-                }
-                // Give the firmware a moment to erase the flash slot before
-                // we start streaming RAM chunks. Skipping this on slower
-                // hubs has caused the first RAM write to ACK but never land.
-                await new Promise((r) => setTimeout(r, 200));
-            }
-
-            // WRITE_USER_RAM in chunks. We use writeValueWithResponse
-            // here (instead of the no-response fast path that META has
-            // to use to avoid the flash-erase ACK problem) because RAM
-            // writes do not trigger slow firmware work — they just copy
-            // into a buffer — and a guaranteed-delivery ACK is essential.
-            for (let off = 0; off < data.length; off += chunkSize) {
-                const end = Math.min(off + chunkSize, data.length);
-                const slice = data.subarray(off, end);
-                const buf = new Uint8Array(overhead + slice.length);
-                buf[0] = CMD_WRITE_USER_RAM;
-                new DataView(buf.buffer).setUint32(1, off, true);
-                buf.set(slice, overhead);
-                try {
-                    await this.commandChar.writeValueWithResponse(buf);
-                } catch (e) {
-                    // Some hubs reject with-response writes for these
-                    // commands too. Fall back to the no-response path and
-                    // accept the (small) risk of a dropped chunk.
-                    if (!this._ramFallbackLogged) {
-                        log(`${this.label}: RAM with-response fejlede (${e && e.message ? e.message : e}), falder tilbage til without-response`);
-                        this._ramFallbackLogged = true;
-                    }
-                    await this._writeCommand(buf);
-                }
-                // Pace chunks: Android BLE stack can ACK a writeValueWithResponse
-                // before the hub has actually processed it. Without a small
-                // pause, fast successive RAM writes occasionally land out of
-                // order or overwrite the previous one, producing a mpy with
-                // corrupt bytes near chunk boundaries.
-                await new Promise((r) => setTimeout(r, 30));
-                this.flashProgress = end / data.length;
-                this.onStateChange();
-            }
-
-            log(`${this.label}: program flashet (${data.length} bytes)`);
-            this.flashSuccessUntil = Date.now() + 4000;
-
-            // Step 3 of the canonical upload: commit by writing META with
-            // the actual program size. This is what tells the firmware
-            // "the upload is complete, persist this image to slot 0".
-            // Without this step the RAM buffer still holds the new program
-            // (so START runs it once) but flash still holds the previous
-            // program (so the hub center button keeps starting the old one).
-            {
-                const buf = new Uint8Array(5);
-                buf[0] = CMD_WRITE_USER_PROGRAM_META;
-                new DataView(buf.buffer).setUint32(1, data.length, true);
-                try {
-                    await this._writeCommand(buf);
-                } catch (e) {
-                    log(`${this.label}: META(size) commit retry efter ${e && e.message ? e.message : e}`);
-                    await new Promise((r) => setTimeout(r, 800));
-                    await this._writeCommand(buf);
-                }
-            }
-
-            // Wait for the firmware to commit the program to flash before
-            // starting. 1.5 s is comfortably above the worst case we have
-            // measured on a Prime Hub.
-            await new Promise((r) => setTimeout(r, 1500));
-
-            // Auto-start the freshly flashed program so we don't end up
-            // running a stale program still sitting in flash from a previous
-            // Pybricks Code upload. Verify success by watching the
-            // USER_PROGRAM_RUNNING status flag; retry once if the firmware
-            // didn't react (e.g. because flash commit was still finishing).
-            const waitForRunning = async (timeoutMs) => {
-                const deadline = Date.now() + timeoutMs;
-                while (Date.now() < deadline) {
-                    if (this.isProgramRunning()) return true;
-                    await new Promise((r) => setTimeout(r, 100));
-                }
-                return false;
-            };
-
-            // Watch for the USER_PROGRAM_RUNNING flag flipping on *or*
-            // off-after-on, so we also recognise short-lived programs
-            // (like our minimal test that finishes before waitForRunning
-            // polls) as a successful start.
-            this.everRanSinceFlash = false;
-            const everRanSnapshot = () => this.everRanSinceFlash;
-            const waitForStart = async (timeoutMs) => {
-                const deadline = Date.now() + timeoutMs;
-                while (Date.now() < deadline) {
-                    if (this.isProgramRunning() || everRanSnapshot()) return true;
-                    await new Promise((r) => setTimeout(r, 75));
-                }
-                return false;
-            };
-
-            try {
-                // Retry the canonical ACK-START flow for ALL hubs now
-                // that we send the proper META(0) -> RAM -> META(size)
-                // upload sequence (which actually commits the program
-                // to flash on shutdown). Display hubs get the diagnostic
-                // prints in scoreboard_display.run_display_hub so we can
-                // see over BLE stdout exactly where (if anywhere) the
-                // program freezes.
-                await this.commandChar.writeValueWithResponse(
-                    new Uint8Array([CMD_START_USER_PROGRAM, 0]),
-                );
-                log(`${this.label}: START_USER_PROGRAM (ack)`);
-
-                let running = await waitForStart(2500);
-
-                if (!running) {
-                    // Fallback: legacy 1-byte START with ACK in case
-                    // the firmware is on an older profile that does
-                    // not accept the slot byte.
-                    log(`${this.label}: START gav ingen status — prøver legacy [0x01] med ACK`);
-                    await new Promise((r) => setTimeout(r, 600));
-                    try {
-                        await this.commandChar.writeValueWithResponse(
-                            new Uint8Array([CMD_START_USER_PROGRAM]),
-                        );
-                        log(`${this.label}: START_USER_PROGRAM legacy (ack)`);
-                    } catch (e) {
-                        log(`${this.label}: legacy ACK-START fejlede (${e && e.message ? e.message : e})`);
-                    }
-                    running = await waitForStart(2500);
-                }
-
-                if (running) {
-                    log(`${this.label}: program startet automatisk`);
-                } else {
-                    this.flashError = "Programmet startede ikke — tryk på hub-knappen eller prøv igen";
-                    log(`${this.label}: ${this.flashError}`);
-                }
-            } catch (e) {
-                this.flashError = `Auto-start fejlede: ${e && e.message ? e.message : e}`;
-                log(`${this.label}: ${this.flashError}`);
-            }
-        } catch (e) {
-            this.flashError = `Flash fejlede: ${e && e.message ? e.message : e}`;
-            log(`${this.label}: ${this.flashError}`);
-            this.flashSuccessUntil = 0;
-            throw e;
-        } finally {
-            this.flashing = false;
-            this.flashProgress = 0;
-            this.onStateChange();
-            // Re-render once the success badge expires.
-            setTimeout(() => this.onStateChange(), 4200);
-            setTimeout(() => { this.flashError = null; this.onStateChange(); }, 6000);
-        }
-    }
 }
 
 // ---------------- Hub instances ----------------
@@ -652,88 +402,16 @@ const sled = new HubConnection("sled", "Puller Sled", (line) => {
     }
 });
 
-// .mpy program bundles produced by tools/build_programs.py in CI and shipped
-// alongside the PWA. Only the sled is reachable from the PWA now.
-const PROGRAM_URLS = {
-    sled: "programs/sled.mpy",
-};
-
-// Loaded from web-app/programs/manifest.json on startup. Maps label -> version
-// (the git short SHA the bundle was built with). Used by the UI to verify that
-// a hub is running the same build as the one currently shipped from CI.
-let programManifest = { version: null, programs: {} };
-
-function expectedVersionFor(label) {
-    const entry = programManifest.programs && programManifest.programs[label];
-    if (!entry) return null;
-    return entry.version || programManifest.version || null;
-}
-
-async function loadProgramManifest() {
-    try {
-        const resp = await fetch("programs/manifest.json?ts=" + Date.now(), { cache: "no-store" });
-        if (!resp.ok) throw new Error("HTTP " + resp.status);
-        const data = await resp.json();
-        if (data && typeof data === "object") {
-            programManifest = {
-                version: data.version || null,
-                programs: data.programs || {},
-            };
-            log(`Manifest indlæst: v${programManifest.version || "?"}`);
-            refreshUi();
-        }
-    } catch (e) {
-        log("Manifest ikke tilgængeligt: " + (e && e.message ? e.message : e));
-    }
-}
-
-async function flashHub(hub) {
-    const url = PROGRAM_URLS[hub.label];
-    if (!url) {
-        log(`FEJL: ingen .mpy URL for ${hub.label}`);
-        return;
-    }
-    try {
-        await hub.flashProgram(url);
-    } catch (e) {
-        log(`FEJL flash ${hub.label}: ` + (e && e.message ? e.message : String(e)));
-    }
-}
-
 function hubStatusText(hub) {
     if (!hub.isConnected()) return "Ikke forbundet";
     const name = hub.device ? hub.device.name : "";
-    if (hub.flashing) {
-        const pct = Math.round((hub.flashProgress || 0) * 100);
-        return `Opdaterer … ${pct}%`;
-    }
-    if (hub.flashError) {
-        return `⚠ ${hub.flashError}`;
-    }
-    if (hub.flashSuccessUntil && Date.now() < hub.flashSuccessUntil) {
-        return `Program opdateret ✓`;
-    }
     if (!hub.hasStatus) return `Forbundet: ${name} · venter på status`;
-    const base = `Forbundet: ${name} · ${hub.isProgramRunning() ? "Program kører" : "Idle"}`;
-    const expected = expectedVersionFor(hub.label);
-    if (hub.actualVersion) {
-        if (expected && hub.actualVersion !== expected) {
-            return `${base} · v${hub.actualVersion} ⚠ (forventet v${expected})`;
-        }
-        const tick = expected ? " ✓" : "";
-        return `${base} · v${hub.actualVersion}${tick}`;
-    }
-    return base;
+    return `Forbundet: ${name} · ${hub.isProgramRunning() ? "Program kører" : "Idle"}`;
 }
 
 function hubStatusKind(hub) {
     if (!hub.isConnected()) return "";
-    if (hub.flashing) return "running";
-    if (hub.flashError) return "error";
-    if (hub.flashSuccessUntil && Date.now() < hub.flashSuccessUntil) return "ok";
     if (!hub.hasStatus) return "ok";
-    const expected = expectedVersionFor(hub.label);
-    if (expected && hub.actualVersion && hub.actualVersion !== expected) return "error";
     return hub.isProgramRunning() ? "running" : "ok";
 }
 
@@ -748,9 +426,8 @@ function refreshUi() {
     setStatus(ui.sledStatus, hubStatusText(sled), hubStatusKind(sled));
     ui.sledConnect.disabled = s;
     ui.sledDisconnect.disabled = !s;
-    ui.sledStart.disabled = !s || sled.isProgramRunning() || sled.flashing;
+    ui.sledStart.disabled = !s || sled.isProgramRunning();
     ui.sledStop.disabled = !s || !sled.isProgramRunning();
-    if (ui.flashSled) ui.flashSled.disabled = !s || sled.flashing;
 
     // Pull / manual / push-config buttons require sled program running.
     const sledReady = s && sled.isProgramRunning();
@@ -862,8 +539,6 @@ ui.sledStop.addEventListener("click", async () => {
 });
 ui.sledPushCfg.addEventListener("click", () => pushConfig());
 if (ui.sledPushCfg2) ui.sledPushCfg2.addEventListener("click", () => pushConfig());
-
-if (ui.flashSled) ui.flashSled.addEventListener("click", () => flashHub(sled));
 
 ui.sledButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1067,7 +742,6 @@ if (btnForceReload) {
 
 loadConfig();
 loadScoreboard();
-loadProgramManifest();
 refreshUi();
 
 if ("serviceWorker" in navigator) {
