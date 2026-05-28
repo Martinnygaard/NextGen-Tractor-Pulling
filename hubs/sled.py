@@ -7,18 +7,13 @@ try:
 except Exception:
     Light = None
 
-# Optional non-blocking stdin reader. Used to accept commands directly from
-# the PWA over the Nordic UART (Pybricks stdin) so no master relay is
-# needed. Falls back to no-op on firmware that lacks uselect.
+# Non-blocking stdin reader. Pybricks delivers NUS RX writes from the PWA
+# to the running program's stdin queue; read_input_byte() is the canonical
+# non-blocking single-byte read (returns -1 when nothing is buffered).
 try:
-    import uselect
+    from pybricks.tools import read_input_byte as _read_input_byte
 except Exception:
-    uselect = None
-
-try:
-    import usys as sys
-except Exception:
-    import sys
+    _read_input_byte = None
 
 
 def pybricks_import(name, fromlist=None):
@@ -455,30 +450,41 @@ def apply_command(seq, action, value):
         queue_debug_event("CMD seq=%d unknown action=%d value=%d" % (seq, action, value))
 
 
+_stdin_buf = b""
+
+
 def _read_stdin_line():
-    """Non-blocking read of one line from stdin, or None if no data.
+    """Non-blocking read of one line from stdin, or None if no full line yet.
 
     The PWA writes Pybricks stdin via the Nordic UART RX char. Lines look
     like ``C <seq> <action> <value>\n`` (same format as the old master
     relay used) so apply_command() can dispatch them unchanged.
     """
-    if uselect is None:
+    global _stdin_buf
+    if _read_input_byte is None:
         return None
-    try:
-        poller = uselect.poll()
-        poller.register(sys.stdin, uselect.POLLIN)
-        events = poller.poll(0)
-    except Exception:
-        return None
-    if not events:
-        return None
-    try:
-        line = sys.stdin.readline()
-    except Exception:
-        return None
-    if not line:
-        return None
-    return line.strip()
+    # Drain everything currently buffered. Stops when read_input_byte()
+    # returns -1 (no more data) or we hit a newline.
+    while True:
+        try:
+            b = _read_input_byte()
+        except Exception:
+            return None
+        if b is None or b < 0:
+            return None
+        if b == 0x0A:  # \n
+            line = _stdin_buf
+            _stdin_buf = b""
+            try:
+                return line.decode().strip()
+            except Exception:
+                return None
+        if b == 0x0D:  # \r — ignore
+            continue
+        _stdin_buf += bytes([b])
+        # Defensive cap so a missing newline can't grow unbounded.
+        if len(_stdin_buf) > 128:
+            _stdin_buf = b""
 
 
 _stdin_seen_seqs = set()
