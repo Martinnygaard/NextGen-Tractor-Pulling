@@ -76,7 +76,6 @@ DISTANCE_CHANNEL = 2
 # build time (see tools/build_programs.py).
 VERSION = "__NGTP_VERSION__"
 print("VERSION sled", VERSION)
-print("RIB avail=", _read_input_byte is not None)
 
 # Sled command actions (must match server/bridge_client.py SLED_ACTION_MAP).
 CMD_NOOP = 0
@@ -377,7 +376,6 @@ def apply_command(seq, action, value):
 
     if action == CMD_START_PULL:
         flag_start_pull = True
-        print("APPLY start_pull seq", seq)
         queue_debug_event("CMD seq=%d start_pull" % seq)
     elif action == CMD_STOP_PULL:
         flag_stop_pull = True
@@ -465,57 +463,43 @@ def _read_stdin_line():
     global _stdin_buf
     if _read_input_byte is None:
         return None
-    # Drain everything currently buffered. Stops when read_input_byte()
-    # returns -1 (no more data) or we hit a newline.
     while True:
         try:
             b = _read_input_byte()
-        except Exception as e:
-            print("RIB exc", e)
+        except Exception:
             return None
         if b is None or b < 0:
             return None
-        print("RIB b=", b)
         if b == 0x0A:  # \n
             line = _stdin_buf
             _stdin_buf = b""
-            print("RIB nl buf=", line)
             try:
-                s = line.decode().strip()
-                print("RIB decoded=", s)
-                return s
-            except Exception as e:
-                print("RIB decode exc", e)
+                return line.decode().strip()
+            except Exception:
                 return None
-        if b == 0x0D:  # \r — ignore
+        if b == 0x0D:  # \r
             continue
         _stdin_buf += bytes([b])
-        # Defensive cap so a missing newline can't grow unbounded.
         if len(_stdin_buf) > 128:
             _stdin_buf = b""
-
 
 _stdin_seen_seqs = set()
 
 
 def _handle_stdin_line(line):
-    print("H1", line)
     if not line:
         return
     parts = line.split()
     if not parts:
         return
     if parts[0] != "C" or len(parts) < 4:
-        print("STDIN ?", line)
         return
     try:
         seq = int(parts[1])
         action = int(parts[2])
         value = int(parts[3])
     except Exception:
-        print("STDIN parse error:", line)
         return
-    print("H2 parsed", seq, action, value)
     # Deduplicate retransmits without rejecting low seqs on reconnect.
     if seq in _stdin_seen_seqs:
         return
@@ -527,7 +511,6 @@ def _handle_stdin_line(line):
             _stdin_seen_seqs.add(seq)
         except Exception:
             pass
-    print("STDIN C", seq, action, value)
     apply_command(seq, action, value)
 
 
