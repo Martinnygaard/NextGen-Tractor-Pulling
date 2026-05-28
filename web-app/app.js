@@ -120,6 +120,7 @@ class HubConnection {
         this.server = null;
         this.service = null;
         this.commandChar = null;
+        this.nusRx = null;
         this.maxWriteSize = 20; // ATT default; may be raised after connect
         this.stdoutBuffer = "";
         this.statusFlags = 0;
@@ -146,6 +147,7 @@ class HubConnection {
         this.device.addEventListener("gattserverdisconnected", () => {
             log(`${this.label}: afbrudt`);
             this.commandChar = null;
+            this.nusRx = null;
             this.service = null;
             this.server = null;
             this.statusFlags = 0;
@@ -238,6 +240,16 @@ class HubConnection {
                 log(`${this.label}: NUS TX subscribed (stdout fallback)`);
             } catch (e) {
                 log(`${this.label}: NUS TX utilgængelig (${e && e.message ? e.message : e})`);
+            }
+            // Also grab NUS RX (host -> hub) so we can write stdin directly.
+            // Pybricks 3.6+ routes raw bytes written here straight into the
+            // running program's stdin queue (which read_input_byte reads).
+            try {
+                this.nusRx = await nusSvc.getCharacteristic(NUS_RX_CHAR);
+                log(`${this.label}: NUS RX claimed (stdin path)`);
+            } catch (e) {
+                this.nusRx = null;
+                log(`${this.label}: NUS RX utilgængelig (${e && e.message ? e.message : e})`);
             }
         } catch (e) {
             log(`${this.label}: NUS service utilgængelig (${e && e.message ? e.message : e})`);
@@ -341,6 +353,22 @@ class HubConnection {
     async writeStdin(text) {
         if (!this.commandChar) throw new Error(`${this.label} ikke forbundet`);
         const bytes = new TextEncoder().encode(text);
+        // Preferred path: Pybricks 3.6+ accepts raw stdin bytes on the
+        // Nordic UART RX char. The command-char WRITE_STDIN opcode (0x06)
+        // is silently dropped on profile 1.4+, so fall back to it only if
+        // NUS RX isn't available.
+        if (this.nusRx) {
+            const CHUNK = 20;
+            for (let off = 0; off < bytes.length; off += CHUNK) {
+                const slice = bytes.subarray(off, off + CHUNK);
+                try {
+                    await this.nusRx.writeValueWithoutResponse(slice);
+                } catch (e) {
+                    await this.nusRx.writeValueWithResponse(slice);
+                }
+            }
+            return;
+        }
         const CHUNK = 18;
         for (let off = 0; off < bytes.length; off += CHUNK) {
             const slice = bytes.subarray(off, off + CHUNK);
