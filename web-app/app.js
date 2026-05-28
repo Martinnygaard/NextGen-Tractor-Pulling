@@ -740,8 +740,8 @@ function hubStatusKind(hub) {
 function refreshUi() {
     const s = sled.isConnected();
 
-    // Top-right pill
-    ui.hubsBtn.textContent = `Hub ${s ? 1 : 0}/1`;
+    // Top-right pill: shows just "Slæde" - colored by connection state.
+    ui.hubsBtn.textContent = "Slæde";
     ui.hubsBtn.dataset.kind = s ? "ok" : "off";
 
     // Sled block
