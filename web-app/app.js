@@ -353,29 +353,25 @@ class HubConnection {
     async writeStdin(text) {
         if (!this.commandChar) throw new Error(`${this.label} ikke forbundet`);
         const bytes = new TextEncoder().encode(text);
-        // Preferred path: Pybricks 3.6+ accepts raw stdin bytes on the
-        // Nordic UART RX char. The command-char WRITE_STDIN opcode (0x06)
-        // is silently dropped on profile 1.4+, so fall back to it only if
-        // NUS RX isn't available.
-        if (this.nusRx) {
-            const CHUNK = 20;
-            for (let off = 0; off < bytes.length; off += CHUNK) {
-                const slice = bytes.subarray(off, off + CHUNK);
-                try {
-                    await this.nusRx.writeValueWithoutResponse(slice);
-                } catch (e) {
-                    await this.nusRx.writeValueWithResponse(slice);
-                }
-            }
-            return;
-        }
+        // Pybricks routes CMD_WRITE_STDIN (0x06) on the command char into the
+        // running program's stdin buffer. The Nordic UART RX char is for the
+        // REPL only and won't reach a running program's read_input_byte().
         const CHUNK = 18;
         for (let off = 0; off < bytes.length; off += CHUNK) {
             const slice = bytes.subarray(off, off + CHUNK);
             const frame = new Uint8Array(1 + slice.length);
             frame[0] = CMD_WRITE_STDIN;
             frame.set(slice, 1);
-            await this._writeCommand(frame);
+            try {
+                // Use with-response so we actually observe GATT errors
+                // (e.g. PBIO_PYBRICKS_ERROR_BUSY when the stdin buffer is
+                // full). Without-response silently drops these.
+                await this.commandChar.writeValueWithResponse(frame);
+                log(`${this.label}: stdin tx ${slice.length}B ok`);
+            } catch (e) {
+                log(`${this.label}: stdin tx ${slice.length}B FEJL: ${e && e.message ? e.message : e}`);
+                throw e;
+            }
         }
     }
 
