@@ -376,6 +376,7 @@ def apply_command(seq, action, value):
 
     if action == CMD_START_PULL:
         flag_start_pull = True
+        print("APPLY start_pull seq", seq)
         queue_debug_event("CMD seq=%d start_pull" % seq)
     elif action == CMD_STOP_PULL:
         flag_stop_pull = True
@@ -491,6 +492,7 @@ _stdin_seen_seqs = set()
 
 
 def _handle_stdin_line(line):
+    print("H1", line)
     if not line:
         return
     parts = line.split()
@@ -506,6 +508,7 @@ def _handle_stdin_line(line):
     except Exception:
         print("STDIN parse error:", line)
         return
+    print("H2 parsed", seq, action, value)
     # Deduplicate retransmits without rejecting low seqs on reconnect.
     if seq in _stdin_seen_seqs:
         return
