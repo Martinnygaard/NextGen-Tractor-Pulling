@@ -475,9 +475,11 @@ def _read_stdin_line():
             line = _stdin_buf
             _stdin_buf = b""
             try:
-                return line.decode().strip()
+                s = line.decode().strip()
             except Exception:
                 return None
+            print("LINE", s)
+            return s
         if b == 0x0D:  # \r
             continue
         _stdin_buf += bytes([b])
