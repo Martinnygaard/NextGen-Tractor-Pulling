@@ -479,9 +479,13 @@ def _read_stdin_line():
         if b == 0x0A:  # \n
             line = _stdin_buf
             _stdin_buf = b""
+            print("RIB nl buf=", line)
             try:
-                return line.decode().strip()
-            except Exception:
+                s = line.decode().strip()
+                print("RIB decoded=", s)
+                return s
+            except Exception as e:
+                print("RIB decode exc", e)
                 return None
         if b == 0x0D:  # \r — ignore
             continue
